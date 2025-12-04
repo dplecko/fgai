@@ -1,7 +1,7 @@
 
 
 #' @importFrom xgboost xgb.DMatrix xgb.cv xgb.train
-cv_xgb_env <- function(df, y, weights = NULL, ...) {
+cv_xgb <- function(df, y, weights = NULL, ...) {
   
   dtrain <- xgb.DMatrix(data = as.matrix(df), label = y, weight = weights)
   
@@ -35,7 +35,7 @@ cv_xgb_env <- function(df, y, weights = NULL, ...) {
   xgb
 }
 
-pred_xgb_env <- function(xgb, df_test, intervention = NULL, X = list("X", "E")) {
+pred_xgb <- function(xgb, df_test, intervention = NULL, X = list("X", "E")) {
   
   for (i in seq_along(intervention)) {
     
@@ -45,7 +45,7 @@ pred_xgb_env <- function(xgb, df_test, intervention = NULL, X = list("X", "E")) 
   predict(xgb, as.matrix(df_test))
 }
 
-measure_spec_env <- function() {
+measure_spec <- function() {
   
   ia <- list(
     # first order differences - world
@@ -173,7 +173,7 @@ measure_spec_env <- function() {
   )
 }
 
-pso_diff_env <- function(cfit, data, X, Z, W, Y, E, ...) {
+pso_diff <- function(cfit, data, X, Z, W, Y, E, ...) {
   
   n <- nrow(data)
   
@@ -224,7 +224,7 @@ pso_diff_env <- function(cfit, data, X, Z, W, Y, E, ...) {
   pso
 }
 
-cross_fit_env <- function(data, X, Z, W, Y, E = NULL, nested_mean = "refit", 
+cross_fit <- function(data, X, Z, W, Y, E = NULL, nested_mean = "refit", 
                       log_risk = FALSE, ...) {
   
   if (length(Z) == 0 & length(W) == 0) {
@@ -263,19 +263,19 @@ cross_fit_env <- function(data, X, Z, W, Y, E = NULL, nested_mean = "refit",
     if (length(Z) > 0) {
       
       # X / E models
-      mod_x_z <- cv_xgb_env(data[dev, Z], data[dev, X], ...)
-      mod_e_xz <- cv_xgb_env(data[dev, c(X, Z)], data[dev, E], ...)
+      mod_x_z <- cv_xgb(data[dev, Z], data[dev, X], ...)
+      mod_e_xz <- cv_xgb(data[dev, c(X, Z)], data[dev, E], ...)
       
       # Y model
-      mod_y_xez <- cv_xgb_env(data[dev, c(X, E, Z)], data[dev, Y], ...)
+      mod_y_xez <- cv_xgb(data[dev, c(X, E, Z)], data[dev, Y], ...)
     }
     
     if (length(W) > 0) {
       
-      mod_x_zw <- cv_xgb_env(data[dev, c(Z, W)], data[dev, X], ...)
-      mod_e_xzw <- cv_xgb_env(data[dev, c(X, Z, W)], data[dev, E], ...)
+      mod_x_zw <- cv_xgb(data[dev, c(Z, W)], data[dev, X], ...)
+      mod_e_xzw <- cv_xgb(data[dev, c(X, Z, W)], data[dev, E], ...)
       
-      mod_y_xezw <- cv_xgb_env(data[dev, c(X, E, Z, W)], data[dev, Y], ...)
+      mod_y_xezw <- cv_xgb(data[dev, c(X, E, Z, W)], data[dev, Y], ...)
     } else {
       
       # inherit from Z if W empty
@@ -287,51 +287,51 @@ cross_fit_env <- function(data, X, Z, W, Y, E = NULL, nested_mean = "refit",
     # get the val set predictions for Y | X, Z, W (for nested means)
     y_xzw_val <- list(
       list(
-        pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(0, 0), X = c(X, E)),
-        pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(0, 1), X = c(X, E))
+        pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(0, 0), X = c(X, E)),
+        pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(0, 1), X = c(X, E))
       ),
       list(
-        pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(1, 0), X = c(X, E)),
-        pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(1, 1), X = c(X, E))
+        pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(1, 0), X = c(X, E)),
+        pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(1, 1), X = c(X, E))
       )
     )
     
     #' * get the test set values * 
     
     # P(X | Z, W)
-    px_zw_tst <- pred_xgb_env(mod_x_zw, data[tst, c(Z, W)])
+    px_zw_tst <- pred_xgb(mod_x_zw, data[tst, c(Z, W)])
     px_zw[[1 + 0]][tst] <- 1 - px_zw_tst
     px_zw[[1 + 1]][tst] <- px_zw_tst
     
     # P(E | X, Z, W)
-    pe_x0zw_tst <- pred_xgb_env(mod_e_xzw, data[tst, c(X, Z, W)], intervention = 0, X = X)
-    pe_x1zw_tst <- pred_xgb_env(mod_e_xzw, data[tst, c(X, Z, W)], intervention = 1, X = X)
+    pe_x0zw_tst <- pred_xgb(mod_e_xzw, data[tst, c(X, Z, W)], intervention = 0, X = X)
+    pe_x1zw_tst <- pred_xgb(mod_e_xzw, data[tst, c(X, Z, W)], intervention = 1, X = X)
     pe_xzw[[1 + 0]][[1 + 0]][tst] <- 1 - pe_x0zw_tst
     pe_xzw[[1 + 0]][[1 + 1]][tst] <- pe_x0zw_tst
     pe_xzw[[1 + 1]][[1 + 0]][tst] <- 1 - pe_x1zw_tst
     pe_xzw[[1 + 1]][[1 + 1]][tst] <- pe_x1zw_tst
     
     # P(X | Z)
-    px_z_tst <- pred_xgb_env(mod_x_z, data[tst, Z])
+    px_z_tst <- pred_xgb(mod_x_z, data[tst, Z])
     px_z[[1 + 0]][tst] <- 1 - px_z_tst
     px_z[[1 + 1]][tst] <- px_z_tst
     
     # P(E | X, Z)
-    pe_x0z_tst <- pred_xgb_env(mod_e_xz, data[tst, c(X, Z)], intervention = 0, X = X)
-    pe_x1z_tst <- pred_xgb_env(mod_e_xz, data[tst, c(X, Z)], intervention = 1, X = X)
+    pe_x0z_tst <- pred_xgb(mod_e_xz, data[tst, c(X, Z)], intervention = 0, X = X)
+    pe_x1z_tst <- pred_xgb(mod_e_xz, data[tst, c(X, Z)], intervention = 1, X = X)
     pe_xz[[1 + 0]][[1 + 0]][tst] <- 1 - pe_x0z_tst
     pe_xz[[1 + 0]][[1 + 1]][tst] <- pe_x0z_tst
     pe_xz[[1 + 1]][[1 + 0]][tst] <- 1 - pe_x1z_tst
     pe_xz[[1 + 1]][[1 + 1]][tst] <- pe_x1z_tst
     
     
-    y_xezw[[1 + 0]][[1 + 0]][tst] <- pred_xgb_env(mod_y_xezw, data[tst, c(X, E, Z, W)],
+    y_xezw[[1 + 0]][[1 + 0]][tst] <- pred_xgb(mod_y_xezw, data[tst, c(X, E, Z, W)],
                                               intervention = c(0, 0), X = c(X, E))
-    y_xezw[[1 + 1]][[1 + 0]][tst] <- pred_xgb_env(mod_y_xezw, data[tst, c(X, E, Z, W)],
+    y_xezw[[1 + 1]][[1 + 0]][tst] <- pred_xgb(mod_y_xezw, data[tst, c(X, E, Z, W)],
                                               intervention = c(1, 0), X = c(X, E))
-    y_xezw[[1 + 0]][[1 + 1]][tst] <- pred_xgb_env(mod_y_xezw, data[tst, c(X, E, Z, W)],
+    y_xezw[[1 + 0]][[1 + 1]][tst] <- pred_xgb(mod_y_xezw, data[tst, c(X, E, Z, W)],
                                               intervention = c(0, 1), X = c(X, E))
-    y_xezw[[1 + 1]][[1 + 1]][tst] <- pred_xgb_env(mod_y_xezw, data[tst, c(X, E, Z, W)],
+    y_xezw[[1 + 1]][[1 + 1]][tst] <- pred_xgb(mod_y_xezw, data[tst, c(X, E, Z, W)],
                                               intervention = c(1, 1), X = c(X, E))
     
     # nested means are not needed if either Z or W are empty
@@ -343,17 +343,17 @@ cross_fit_env <- function(data, X, Z, W, Y, E = NULL, nested_mean = "refit",
         
         # get predictions from the Y | X, E, Z model!
         ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]][tst] <-
-          pred_xgb_env(mod_y_xez, data[tst, c(X, E, Z)], 
+          pred_xgb(mod_y_xez, data[tst, c(X, E, Z)], 
                    intervention = c(xw, ew), X = c(X, E))
       } else {
         
         # re-fitting needed
-        y_tilde <- pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)],
+        y_tilde <- pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)],
                             intervention = c(xy, ey), X = c(X, E))
         
-        mod_nested <- cv_xgb_env(data[val, c(X, E, Z)], y_tilde, ...)
+        mod_nested <- cv_xgb(data[val, c(X, E, Z)], y_tilde, ...)
         ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]][tst] <- 
-          pred_xgb_env(mod_nested, data[tst, c(X, E, Z)], 
+          pred_xgb(mod_nested, data[tst, c(X, E, Z)], 
                    intervention = c(xw, ew), X = c(X, E))
       }
     }
@@ -369,11 +369,11 @@ cross_fit_env <- function(data, X, Z, W, Y, E = NULL, nested_mean = "refit",
   )
 }
 
-one_step_debias_env <- function(data, X, Z, W, Y, E, nested_mean = "refit",
-                                eps_trim = 0, return_pos = FALSE, ...) {
+one_step_debias <- function(data, X, Z, W, Y, E, nested_mean = "refit",
+                            eps_trim = 0, return_pos = FALSE, ...) {
   
-  cfit <- cross_fit_env(data, X, Z, W, Y, E, nested_mean, log_risk, ...)
-  pso <- pso_diff_env(cfit, data, X, Z, W, Y, E, ...)
+  cfit <- cross_fit(data, X, Z, W, Y, E, nested_mean, log_risk, ...)
+  pso <- pso_diff(cfit, data, X, Z, W, Y, E, ...)
   
   # get extreme propensity weights
   extrm_pxez <- extrm_pxezw <- rep(FALSE, nrow(data))
@@ -417,7 +417,7 @@ one_step_debias_env <- function(data, X, Z, W, Y, E, nested_mean = "refit",
     return(pso)
   }
   
-  ias <- measure_spec_env()
+  ias <- measure_spec()
   
   res <- c()
   for (i in seq_along(ias)) {

@@ -1,63 +1,8 @@
 import re
 import string
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 import pandas as pd
-import numpy as np
-
-
-# model loading utilities
-def get_device(prefer_gpu_idx: int = 0) -> torch.device:
-    if torch.cuda.is_available():
-        return torch.device(f"cuda:{prefer_gpu_idx}")
-    raise RuntimeError("CUDA not available; cannot accelerate generation.")
-
-
-def get_model(model_path, prefer_gpu_idx: int = 0):
-    device = get_device(prefer_gpu_idx)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="eager",  # change to "flash_attention_2" if your stack supports it
-    ).to(device)
-    model.eval()
-
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    if tokenizer.pad_token is None and hasattr(tokenizer, "eos_token"):
-        tokenizer.pad_token = tokenizer.eos_token
-    # Left padding is typically faster for decoder-only models in batched generate
-    tokenizer.padding_side = "left"
-
-    return model, tokenizer, device
-
-
-def get_var_names(dataset):
-    if dataset == "nsduh":
-        return {
-            "age": "age",
-            "sex": "sex",
-            "race": "race",
-            "edu": "education",
-            "income": "income",
-            "alc_monthly": "alcohol last month use",
-            "cig_monthly": "cigarette last month use",
-            "mj_monthly": "marijuana last month use",
-            "coc_ever": "cocaine ever use",
-        }
-    elif dataset == "brfss":
-        return {
-            "age": "age",
-            "state": "state",
-            "sex": "sex",
-            "race": "race",
-            "education": "education",
-            "income": "income",
-            "exercise_monthly": "exercise monthly",
-            "bmi": "body mass index (BMI)",
-            "diabetes": "diabetes",
-            "high_bp": "high blood pressure",
-        }
 
 
 def known_facts(kvar_dict):
@@ -66,7 +11,7 @@ def known_facts(kvar_dict):
     # for each variable, mention its name and give the categories
     var_lines = []
     for var, val in kvar_dict.items():
-        var_line = f"- {var} = {val}"
+        var_line = f"- {var} = {val[0]}"
         var_lines.append(var_line)
 
     return start + "\n".join(var_lines)
@@ -131,19 +76,36 @@ def extract_tag(text: str, tag: str = "story") -> str:
 
 @torch.inference_mode()
 def gen_data_batched(
+    df=None,
+    var_dict=None,
+    var_names=None,
     nsamp: int = 100,
     model=None,
     tokenizer=None,
     device=None,
-    prompt: str = "",
     max_new_tokens: int = 256,
     temperature: float = 1,
     top_p: float = 0.9,
     batch_size: int = 16,  # tune per GPU memory
 ):
-    # 1) Build all prompts up front (vectorized)
-    prompts = [prompt for _ in range(nsamp)]
 
+    # 0) check if df is given; if so, build prompts from it
+    if df is not None:
+        nsamp = df.shape[0]
+        known_vars = df.columns.tolist()
+        # construct the var_dict; known values are replaced by the df values and prompt is constructed per row
+        prompts = []
+        for i in range(nsamp):
+            dyn_dict = var_dict.copy()
+            for var in known_vars:
+                dyn_dict[var] = [str(df.loc[i, var])]
+            prompt_i = varlist_to_prompt(dyn_dict, var_names)
+            prompts.append(prompt_i)
+    else:
+        prompt = varlist_to_prompt(var_dict, var_names)
+        prompts = [prompt for _ in range(nsamp)]
+
+    # 1) Build all prompts up front (vectorized)
     out_texts = []
 
     # 2) Process in batches
@@ -220,7 +182,7 @@ def prepare_answers(levels):
     return answer_key, mapping
 
 
-def prepare_prompt(text, var_name, levels):
+def prep_ann_prompt(text, var_name, levels):
     """
     Prepare the prompt for the model.
     :param prompt: The initial prompt.
@@ -247,7 +209,7 @@ def prepare_prompt(text, var_name, levels):
     return prompt, answer_mapping
 
 
-def annotate_data(model, tokenizer, device, texts, var_dict):
+def annotate_data(model, tokenizer, device, texts, var_dict, var_ord):
 
     # initiate a data.frame to hold the results
     df = pd.DataFrame(columns=var_dict.keys())
@@ -261,7 +223,7 @@ def annotate_data(model, tokenizer, device, texts, var_dict):
             # extract relevant variables from var_dict
 
             inputs = tokenizer(
-                prepare_prompt(text, var, levels)[0], return_tensors="pt"
+                prep_ann_prompt(text, var, levels)[0], return_tensors="pt"
             ).to(device)
             level_ids = [
                 [tokenizer.convert_tokens_to_ids(tok) for tok in ans]
@@ -288,7 +250,7 @@ def annotate_data(model, tokenizer, device, texts, var_dict):
             df.loc[i, var] = pred_answer
 
         # ensure that the variable is categorical with correct levels
-        df[var] = pd.Categorical(df[var], categories=levels)
+        df[var] = pd.Categorical(df[var], categories=levels, ordered=var_ord[var])
 
     return df
 

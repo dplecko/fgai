@@ -3,21 +3,37 @@ root <- rprojroot::find_root(rprojroot::has_file(".gitignore"))
 invisible(lapply(list.files(file.path(root, "r"), full.names = TRUE), 
                  source))
 
+method <- "within"
+dataset <- "nsduh"
+model <- "llama3_8b_instruct"
+
 # load the data
-df <- as.data.frame(read_parquet("data/nsduh_envs_llama3_8b.parquet"))
+# df <- as.data.frame(read_parquet("data/nsduh_envs_llama3_8b.parquet"))
 
-head(df)
-
-# subset to relevant attribute
-df <- df[df$race %in% c("Black", "White"), ]
-df$race <- as.integer(df$race == "Black")
-
-# inspect features that cause non-overlap
-ggplot(
-  melt.data.table(as.data.table(df), id.vars = c("race", "env")),
-  aes(x = value, fill = factor(env))
-) + geom_histogram(aes(y = after_stat(density)), position = "dodge", alpha = 0.5) + theme_bw() +
-  facet_wrap(~variable, scales = "free")
+if (method == "cross") {
+  
+  df_s0 <- read_parquet(f("data/{dataset}_{model}_XZWY.parquet"))
+  df_s0$env <- 0
+  df_s1 <- read_parquet(f("data/{dataset}_{model}_.parquet"))
+  df_s1$env <- 1
+  df <- rbind(as.data.frame(df_s0), as.data.frame(df_s1))
+  df <- df[df$race %in% c("Black", "White"), ]
+  df$race <- as.integer(df$race == "Black")
+} else {
+  
+  envs <- c("", "XZ", "XZW", "XZWY")
+  df_lst <- lapply(
+    envs, 
+    function(x) {
+      fl <- paste0(paste0(c(dataset, model, x), collapse = "_"), ".parquet")
+      df <- as.data.frame(read_parquet(file.path("data", fl)))
+      df <- df[df$race %in% c("Black", "White"), ]
+      df$race <- as.integer(df$race == "Black")
+      df
+    }
+  )
+  names(df_lst) <- envs
+}
 
 # construct the SFM
 X <- "race"
@@ -27,75 +43,54 @@ Y <- c("mj_monthly")
 E <- "env"
 
 # perform the causal decomposition
-res <- one_step_debias(df, X, Z, W, Y, E, eps_trim = 0.001)
-
-plot_one <- function(res) {
+if (method == "cross") {
   
-  res2 <- as.data.table(res)
-  res2 <- res2[!grepl("delta", measure)]
-  res2[, meas := gsub("-.*", "", measure)]
-  res2[, env := gsub(".*-", "", measure)]
+  res <- one_step_debias_env(df, X, Z, W, Y, E, eps_trim = 0.001)
+} else {
   
-  pd <- position_dodge(width = 0.9)
+  meas <- c()
+  for (i in 1:3) meas <- list(meas, meas)
+  for (env in envs) {
+    
+    sz <- if (grepl("XZ", env)) 0 else 1
+    sw <- if (grepl("W", env)) 0 else 1
+    sy <- if (grepl("Y", env)) 0 else 1
+    if (env == "") env <- 1
+    
+    meas[[1+sz]][[1+sw]][[1+sy]] <- one_step_debias(df_lst[[env]], X, Z, W, Y, 
+                                                    eps_trim = 0.001)
+  }
   
-  res2[, Measure := factor(meas, levels = c("tv", "ctfde", "ctfie", "ctfse"),
-                        labels = c("TV", "Ctf-DE", "Ctf-IE", "Ctf-SE"))]
+  res_w <- copy(meas[[1]][[1]][[1]])
+  res_m <- copy(meas[[2]][[2]][[2]])
+  res <- rbind(
+    res_w[, measure := paste0(measure, "-world")],
+    res_m[, measure := paste0(measure, "-model")]
+  )
   
-  res2[, Environment := factor(env, levels = c("world", "model"), 
-                       labels = c("World", "Model"))]
-  ggplot(res2,aes(x = Measure, y = value, fill = Measure, 
-                  pattern = Environment, group = Environment)) +
-    geom_col_pattern(
-      position = pd,
-      colour = "black",
-      linewidth = 1,
-      pattern_fill = "black",
-      pattern_density = 0.2,
-      pattern_spacing = 0.05
-    ) +
-    geom_errorbar(
-      aes(ymin = value - 1.96 * sd,
-          ymax = value + 1.96 * sd),
-      position = pd,
-      width = 0.25
-    ) +
-    theme_bw() + scale_y_continuous(labels = scales::percent) +
-    theme(legend.position = "inside", legend.position.inside = c(0.65, 0.85),
-          legend.direction = "horizontal", legend.box.background = element_rect())
+  take_delta <- function(meas, s, sp, ce, mech) {
+    
+    ctfm <- paste0("ctf", ce)
+    m <- copy(meas[[1+s[1]]][[1+s[2]]][[1+s[3]]][measure == ctfm])
+    mp <- copy(meas[[1+sp[1]]][[1+sp[2]]][[1+sp[3]]][measure == ctfm])
+    delta_meas <- paste0(c("delta", ce, mech), collapse="-")
+    data.table(
+      measure = delta_meas, value = mp$value - m$value, 
+      sd = sqrt(mp$sd^2 + m$sd^2)
+    )
+  }
+  for (ce in c("de", "ie", "se")) {
+    
+    res <- rbind(
+      res,
+      take_delta(meas, c(0, 0, 0), c(0, 0, 1), ce, "fy"),
+      take_delta(meas, c(0, 0, 1), c(0, 1, 1), ce, "fw"),
+      take_delta(meas, c(0, 1, 1), c(1, 1, 1), ce, "fz")
+    )
+  }
 }
 
 plot_one(res)
-
-plot_three <- function(res) {
-  
-  res <- as.data.table(res)
-  
-  res[grepl("de-", measure), group := c("DE")]
-  res[grepl("ie-", measure), group := c("IE")]
-  res[grepl("se-", measure), group := c("SE")]
-  
-  res[, env := gsub(".*-", "", measure)]
-  
-  res[, env := factor(env, levels = c("world", "model", "fy", "fw", "fz"),
-                      labels = c("World", "Model", "f_Y", "f_W", "f_Z"))]
-  
-  plotlist <- list()
-  for (grp in c("DE", "IE", "SE")) {
-    
-    cres <- res[group == grp]
-    cres[3:5, value := -value]
-    plotlist[[grp]] <- waterfall_plot(
-      comp = c(paste0("World (", grp, ")"), "Delta f_Y", "Delta f_W", 
-               "Delta f_Z", paste0("Model (", grp, ")")),
-      val = c(cres$value[c(1, 3, 4, 5)], 0),
-      sd = c(cres$sd[c(1, 3, 4, 5, 2)])
-    )
-  }
-  
-  plotlist
-  # cowplot::plot_grid(plotlist = plotlist, labels = c("A", "B", "C"), ncol=3)
-}
-
 wfalls <- plot_three(res)
 
 ggsave("results/tv-decomps-nsduh-llama3-8b.png", plot = plot_one(res),

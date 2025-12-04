@@ -1,7 +1,10 @@
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 MODEL_PATHS = {
     ### instruct versions
     "llama3_8b_instruct": (
-        "/local/eb/dp3144/llama3_8b_instruct",
+        "meta-llama/Meta-Llama-3.1-8B-Instruct",
         True,
     ),  # LLaMA 3.1 8B-Instruct
     "llama3_70b_instruct": (
@@ -29,3 +32,30 @@ MODEL_PATHS = {
     "deepseek_7b": ("/local/eb/dp3144/deepseek_7b", False),  # Regular DeepSeek
     "gpt2": ("/local/eb/dp3144/gpt2", False),  # Regular GPT-2
 }
+
+
+# model loading utilities
+def get_device(prefer_gpu_idx: int = 0) -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device(f"cuda:{prefer_gpu_idx}")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def get_model(model_path, prefer_gpu_idx: int = 0):
+    device = get_device(prefer_gpu_idx)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="eager",  # change to "flash_attention_2" if your stack supports it
+    ).to(device)
+    model.eval()
+
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    if tokenizer.pad_token is None and hasattr(tokenizer, "eos_token"):
+        tokenizer.pad_token = tokenizer.eos_token
+    # Left padding is typically faster for decoder-only models in batched generate
+    tokenizer.padding_side = "left"
+
+    return model, tokenizer, device
