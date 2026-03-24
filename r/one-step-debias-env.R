@@ -1,7 +1,7 @@
 
 
 #' @importFrom xgboost xgb.DMatrix xgb.cv xgb.train
-cv_xgb <- function(df, y, weights = NULL, ...) {
+cv_xgb_env <- function(df, y, weights = NULL, ...) {
   
   dtrain <- xgb.DMatrix(data = as.matrix(df), label = y, weight = weights)
   
@@ -35,7 +35,7 @@ cv_xgb <- function(df, y, weights = NULL, ...) {
   xgb
 }
 
-pred_xgb <- function(xgb, df_test, intervention = NULL, X = list("X", "E")) {
+pred_xgb_env <- function(xgb, df_test, intervention = NULL, X = list("X", "E")) {
   
   for (i in seq_along(intervention)) {
     
@@ -45,7 +45,203 @@ pred_xgb <- function(xgb, df_test, intervention = NULL, X = list("X", "E")) {
   predict(xgb, as.matrix(df_test))
 }
 
-measure_spec <- function() {
+cross_fit_env <- function(data, X, Z, W, Y, E = NULL, nested_mean = "refit", 
+                          log_risk = FALSE, ...) {
+  
+  if (length(Z) == 0 & length(W) == 0) {
+    
+    px <- rep(mean(data[[X]]), nrow(data))
+    return(list(px_z = list(1-px, px), px_zw = list(1-px, px)))
+  }
+  
+  # split into K folds
+  n <- nrow(data)
+  K <- 10
+  folds <- sample(x = rep(1:K, each = ceiling(n / K)))[seq_len(n)]
+  
+  # elements to be filled
+  px_zw <- px_z <- list(rep(NA, n), rep(NA, n))
+  
+  y_xezw <- y_xez <- ey_nest <- pe_xz <- pe_xzw <-
+    list(list(rep(NA, n), rep(NA, n)), list(rep(NA, n), rep(NA, n)))
+  
+  ey_nest <- list(list(ey_nest, ey_nest), list(ey_nest, ey_nest))
+  
+  # x, y data
+  y <- data[[Y]]
+  x <- data[[X]]
+  e <- data[[E]]
+  
+  # cross-fit
+  for (i in seq_len(K)) {
+    
+    #' * fold splitting * split into dev, val, tst
+    tst <- folds == i
+    dev <- folds %in% setdiff(seq_len(K), i)[1:6]
+    val <- folds %in% setdiff(seq_len(K), i)[7:9]
+    
+    #' * model fitting * develop models on dev
+    if (length(Z) > 0) {
+      
+      # X / E models
+      mod_x_z <- cv_xgb_env(data[dev, Z], data[dev, X], ...)
+      mod_e_xz <- cv_xgb_env(data[dev, c(X, Z)], data[dev, E], ...)
+      
+      # Y model
+      mod_y_xez <- cv_xgb_env(data[dev, c(X, E, Z)], data[dev, Y], ...)
+    }
+    
+    if (length(W) > 0) {
+      
+      mod_x_zw <- cv_xgb_env(data[dev, c(Z, W)], data[dev, X], ...)
+      mod_e_xzw <- cv_xgb_env(data[dev, c(X, Z, W)], data[dev, E], ...)
+      
+      mod_y_xezw <- cv_xgb_env(data[dev, c(X, E, Z, W)], data[dev, Y], ...)
+    } else {
+      
+      # inherit from Z if W empty
+      mod_x_zw <- mod_x_z
+      mod_e_xzw <- mod_e_xz
+      mod_y_xezw <- mod_y_xez
+    }
+    
+    # get the val set predictions for Y | X, Z, W (for nested means)
+    y_xzw_val <- list(
+      list(
+        pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(0, 0), X = c(X, E)),
+        pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(0, 1), X = c(X, E))
+      ),
+      list(
+        pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(1, 0), X = c(X, E)),
+        pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(1, 1), X = c(X, E))
+      )
+    )
+    
+    #' * get the test set values * 
+    
+    # P(X | Z, W)
+    px_zw_tst <- pred_xgb_env(mod_x_zw, data[tst, c(Z, W)])
+    px_zw[[1 + 0]][tst] <- 1 - px_zw_tst
+    px_zw[[1 + 1]][tst] <- px_zw_tst
+    
+    # P(E | X, Z, W)
+    pe_x0zw_tst <- pred_xgb_env(mod_e_xzw, data[tst, c(X, Z, W)], intervention = 0, X = X)
+    pe_x1zw_tst <- pred_xgb_env(mod_e_xzw, data[tst, c(X, Z, W)], intervention = 1, X = X)
+    pe_xzw[[1 + 0]][[1 + 0]][tst] <- 1 - pe_x0zw_tst
+    pe_xzw[[1 + 0]][[1 + 1]][tst] <- pe_x0zw_tst
+    pe_xzw[[1 + 1]][[1 + 0]][tst] <- 1 - pe_x1zw_tst
+    pe_xzw[[1 + 1]][[1 + 1]][tst] <- pe_x1zw_tst
+    
+    # P(X | Z)
+    px_z_tst <- pred_xgb_env(mod_x_z, data[tst, Z])
+    px_z[[1 + 0]][tst] <- 1 - px_z_tst
+    px_z[[1 + 1]][tst] <- px_z_tst
+    
+    # P(E | X, Z)
+    pe_x0z_tst <- pred_xgb_env(mod_e_xz, data[tst, c(X, Z)], intervention = 0, X = X)
+    pe_x1z_tst <- pred_xgb_env(mod_e_xz, data[tst, c(X, Z)], intervention = 1, X = X)
+    pe_xz[[1 + 0]][[1 + 0]][tst] <- 1 - pe_x0z_tst
+    pe_xz[[1 + 0]][[1 + 1]][tst] <- pe_x0z_tst
+    pe_xz[[1 + 1]][[1 + 0]][tst] <- 1 - pe_x1z_tst
+    pe_xz[[1 + 1]][[1 + 1]][tst] <- pe_x1z_tst
+    
+    
+    y_xezw[[1 + 0]][[1 + 0]][tst] <- pred_xgb_env(mod_y_xezw, data[tst, c(X, E, Z, W)],
+                                                  intervention = c(0, 0), X = c(X, E))
+    y_xezw[[1 + 1]][[1 + 0]][tst] <- pred_xgb_env(mod_y_xezw, data[tst, c(X, E, Z, W)],
+                                                  intervention = c(1, 0), X = c(X, E))
+    y_xezw[[1 + 0]][[1 + 1]][tst] <- pred_xgb_env(mod_y_xezw, data[tst, c(X, E, Z, W)],
+                                                  intervention = c(0, 1), X = c(X, E))
+    y_xezw[[1 + 1]][[1 + 1]][tst] <- pred_xgb_env(mod_y_xezw, data[tst, c(X, E, Z, W)],
+                                                  intervention = c(1, 1), X = c(X, E))
+    
+    # nested means are not needed if either Z or W are empty
+    if (length(Z) == 0 || length(W) == 0) next
+    
+    for (xw in c(0, 1)) for (xy in c(0, 1)) for (ey in c(0, 1)) for (ew in c(0, 1)) {
+      
+      if (xw == xy & ew == ey) {
+        
+        # get predictions from the Y | X, E, Z model!
+        ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]][tst] <-
+          pred_xgb_env(mod_y_xez, data[tst, c(X, E, Z)], 
+                       intervention = c(xw, ew), X = c(X, E))
+      } else {
+        
+        # re-fitting needed
+        y_tilde <- pred_xgb_env(mod_y_xezw, data[val, c(X, E, Z, W)],
+                                intervention = c(xy, ey), X = c(X, E))
+        
+        mod_nested <- cv_xgb_env(data[val, c(X, E, Z)], y_tilde, ...)
+        ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]][tst] <- 
+          pred_xgb_env(mod_nested, data[tst, c(X, E, Z)], 
+                       intervention = c(xw, ew), X = c(X, E))
+      }
+    }
+  }
+  
+  list(
+    y_xezw = y_xezw,
+    ey_nest = ey_nest,
+    px_z = px_z,
+    px_zw = px_zw,
+    pe_xzw = pe_xzw,
+    pe_xz = pe_xz
+  )
+}
+
+pso_diff_env <- function(cfit, data, X, Z, W, Y, E, ...) {
+  
+  n <- nrow(data)
+  
+  # un-nest the cfit object
+  y_xezw <- cfit$y_xezw
+  ey_nest <- cfit$ey_nest
+  px_z <- cfit$px_z
+  px_zw <- cfit$px_zw
+  pe_xz <- cfit$pe_xz
+  pe_xzw <- cfit$pe_xzw
+  
+  
+  # get data and psos
+  y <- data[[Y]]
+  x <- data[[X]]
+  e <- data[[E]]
+  
+  pso <- list()
+  for (i in 1:6) pso <- list(pso, pso)
+  
+  for (xz in c(0, 1)) for (xw in c(0, 1)) for (xy in c(0, 1))
+    for (ez in c(0, 1)) for (ew in c(0, 1)) for (ey in c(0, 1)) {
+    
+    pso[[xz+1]][[ez+1]][[xw+1]][[ew+1]][[xy+1]][[ey+1]] <- rep(NA, n)
+  }
+  
+  for (xz in c(0, 1)) for (xw in c(0, 1)) for (xy in c(0, 1))
+    for (ez in c(0, 1)) for (ew in c(0, 1)) for (ey in c(0, 1)) {
+    
+    pso[[xz+1]][[ez+1]][[xw+1]][[ew+1]][[xy+1]][[ey+1]] <-
+      
+      # Term T1
+      (x == xy & e == ey) /  mean(x == xz & e == ez) * 
+      px_z[[xz+1]] * pe_xz[[xz+1]][[ez+1]] / (px_z[[xw+1]] * pe_xz[[xw+1]][[ew+1]]) *
+      px_zw[[xw+1]] * pe_xzw[[xw+1]][[ew+1]] / (px_zw[[xy+1]] * pe_xzw[[xy+1]][[ey+1]]) *
+      (y - y_xezw[[xy+1]][[ey+1]]) + 
+      
+      # Term T2
+      (x == xw & e == ew) / mean(x == xz & e == ez) * 
+      px_z[[xz+1]] * pe_xz[[xz+1]][[ez+1]] / ( px_z[[xw+1]] * pe_xz[[xw+1]][[ew+1]] ) *
+      (y_xezw[[xy+1]][[ey+1]] - ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]]) +
+      
+      # Term T3
+      (x == xz & e == ez) / mean(x == xz & e == ez) * 
+        ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]]
+  }
+  
+  pso
+}
+
+measure_spec_env <- function() {
   
   ia <- list(
     # first order differences - world
@@ -173,207 +369,11 @@ measure_spec <- function() {
   )
 }
 
-pso_diff <- function(cfit, data, X, Z, W, Y, E, ...) {
+one_step_debias_env <- function(data, X, Z, W, Y, E, nested_mean = "refit",
+                                eps_trim = 0, return_pos = FALSE, ...) {
   
-  n <- nrow(data)
-  
-  # un-nest the cfit object
-  y_xezw <- cfit$y_xezw
-  ey_nest <- cfit$ey_nest
-  px_z <- cfit$px_z
-  px_zw <- cfit$px_zw
-  pe_xz <- cfit$pe_xz
-  pe_xzw <- cfit$pe_xzw
-  
-  
-  # get data and psos
-  y <- data[[Y]]
-  x <- data[[X]]
-  e <- data[[E]]
-  
-  pso <- list()
-  for (i in 1:6) pso <- list(pso, pso)
-  
-  for (xz in c(0, 1)) for (xw in c(0, 1)) for (xy in c(0, 1))
-    for (ez in c(0, 1)) for (ew in c(0, 1)) for (ey in c(0, 1)) {
-    
-    pso[[xz+1]][[ez+1]][[xw+1]][[ew+1]][[xy+1]][[ey+1]] <- rep(NA, n)
-  }
-  
-  for (xz in c(0, 1)) for (xw in c(0, 1)) for (xy in c(0, 1))
-    for (ez in c(0, 1)) for (ew in c(0, 1)) for (ey in c(0, 1)) {
-    
-    pso[[xz+1]][[ez+1]][[xw+1]][[ew+1]][[xy+1]][[ey+1]] <-
-      
-      # Term T1
-      (x == xy & e == ey) /  mean(x == xz & e == ez) * 
-      px_z[[xz+1]] * pe_xz[[xz+1]][[ez+1]] / (px_z[[xw+1]] * pe_xz[[xw+1]][[ew+1]]) *
-      px_zw[[xw+1]] * pe_xzw[[xw+1]][[ew+1]] / (px_zw[[xy+1]] * pe_xzw[[xy+1]][[ey+1]]) *
-      (y - y_xezw[[xy+1]][[ey+1]]) + 
-      
-      # Term T2
-      (x == xw & e == ew) / mean(x == xz & e == ez) * 
-      px_z[[xz+1]] * pe_xz[[xz+1]][[ez+1]] / ( px_z[[xw+1]] * pe_xz[[xw+1]][[ew+1]] ) *
-      (y_xezw[[xy+1]][[ey+1]] - ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]]) +
-      
-      # Term T3
-      (x == xz & e == ez) / mean(x == xz & e == ez) * 
-        ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]]
-  }
-  
-  pso
-}
-
-cross_fit <- function(data, X, Z, W, Y, E = NULL, nested_mean = "refit", 
-                      log_risk = FALSE, ...) {
-  
-  if (length(Z) == 0 & length(W) == 0) {
-    
-    px <- rep(mean(data[[X]]), nrow(data))
-    return(list(px_z = list(1-px, px), px_zw = list(1-px, px)))
-  }
-  
-  # split into K folds
-  n <- nrow(data)
-  K <- 10
-  folds <- sample(x = rep(1:K, each = ceiling(n / K)))[seq_len(n)]
-  
-  # elements to be filled
-  px_zw <- px_z <- list(rep(NA, n), rep(NA, n))
-  
-  y_xezw <- y_xez <- ey_nest <- pe_xz <- pe_xzw <-
-    list(list(rep(NA, n), rep(NA, n)), list(rep(NA, n), rep(NA, n)))
-  
-  ey_nest <- list(list(ey_nest, ey_nest), list(ey_nest, ey_nest))
-  
-  # x, y data
-  y <- data[[Y]]
-  x <- data[[X]]
-  e <- data[[E]]
-  
-  # cross-fit
-  for (i in seq_len(K)) {
-    
-    #' * fold splitting * split into dev, val, tst
-    tst <- folds == i
-    dev <- folds %in% setdiff(seq_len(K), i)[1:6]
-    val <- folds %in% setdiff(seq_len(K), i)[7:9]
-    
-    #' * model fitting * develop models on dev
-    if (length(Z) > 0) {
-      
-      # X / E models
-      mod_x_z <- cv_xgb(data[dev, Z], data[dev, X], ...)
-      mod_e_xz <- cv_xgb(data[dev, c(X, Z)], data[dev, E], ...)
-      
-      # Y model
-      mod_y_xez <- cv_xgb(data[dev, c(X, E, Z)], data[dev, Y], ...)
-    }
-    
-    if (length(W) > 0) {
-      
-      mod_x_zw <- cv_xgb(data[dev, c(Z, W)], data[dev, X], ...)
-      mod_e_xzw <- cv_xgb(data[dev, c(X, Z, W)], data[dev, E], ...)
-      
-      mod_y_xezw <- cv_xgb(data[dev, c(X, E, Z, W)], data[dev, Y], ...)
-    } else {
-      
-      # inherit from Z if W empty
-      mod_x_zw <- mod_x_z
-      mod_e_xzw <- mod_e_xz
-      mod_y_xezw <- mod_y_xez
-    }
-    
-    # get the val set predictions for Y | X, Z, W (for nested means)
-    y_xzw_val <- list(
-      list(
-        pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(0, 0), X = c(X, E)),
-        pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(0, 1), X = c(X, E))
-      ),
-      list(
-        pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(1, 0), X = c(X, E)),
-        pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)], intervention = c(1, 1), X = c(X, E))
-      )
-    )
-    
-    #' * get the test set values * 
-    
-    # P(X | Z, W)
-    px_zw_tst <- pred_xgb(mod_x_zw, data[tst, c(Z, W)])
-    px_zw[[1 + 0]][tst] <- 1 - px_zw_tst
-    px_zw[[1 + 1]][tst] <- px_zw_tst
-    
-    # P(E | X, Z, W)
-    pe_x0zw_tst <- pred_xgb(mod_e_xzw, data[tst, c(X, Z, W)], intervention = 0, X = X)
-    pe_x1zw_tst <- pred_xgb(mod_e_xzw, data[tst, c(X, Z, W)], intervention = 1, X = X)
-    pe_xzw[[1 + 0]][[1 + 0]][tst] <- 1 - pe_x0zw_tst
-    pe_xzw[[1 + 0]][[1 + 1]][tst] <- pe_x0zw_tst
-    pe_xzw[[1 + 1]][[1 + 0]][tst] <- 1 - pe_x1zw_tst
-    pe_xzw[[1 + 1]][[1 + 1]][tst] <- pe_x1zw_tst
-    
-    # P(X | Z)
-    px_z_tst <- pred_xgb(mod_x_z, data[tst, Z])
-    px_z[[1 + 0]][tst] <- 1 - px_z_tst
-    px_z[[1 + 1]][tst] <- px_z_tst
-    
-    # P(E | X, Z)
-    pe_x0z_tst <- pred_xgb(mod_e_xz, data[tst, c(X, Z)], intervention = 0, X = X)
-    pe_x1z_tst <- pred_xgb(mod_e_xz, data[tst, c(X, Z)], intervention = 1, X = X)
-    pe_xz[[1 + 0]][[1 + 0]][tst] <- 1 - pe_x0z_tst
-    pe_xz[[1 + 0]][[1 + 1]][tst] <- pe_x0z_tst
-    pe_xz[[1 + 1]][[1 + 0]][tst] <- 1 - pe_x1z_tst
-    pe_xz[[1 + 1]][[1 + 1]][tst] <- pe_x1z_tst
-    
-    
-    y_xezw[[1 + 0]][[1 + 0]][tst] <- pred_xgb(mod_y_xezw, data[tst, c(X, E, Z, W)],
-                                              intervention = c(0, 0), X = c(X, E))
-    y_xezw[[1 + 1]][[1 + 0]][tst] <- pred_xgb(mod_y_xezw, data[tst, c(X, E, Z, W)],
-                                              intervention = c(1, 0), X = c(X, E))
-    y_xezw[[1 + 0]][[1 + 1]][tst] <- pred_xgb(mod_y_xezw, data[tst, c(X, E, Z, W)],
-                                              intervention = c(0, 1), X = c(X, E))
-    y_xezw[[1 + 1]][[1 + 1]][tst] <- pred_xgb(mod_y_xezw, data[tst, c(X, E, Z, W)],
-                                              intervention = c(1, 1), X = c(X, E))
-    
-    # nested means are not needed if either Z or W are empty
-    if (length(Z) == 0 || length(W) == 0) next
-    
-    for (xw in c(0, 1)) for (xy in c(0, 1)) for (ey in c(0, 1)) for (ew in c(0, 1)) {
-      
-      if (xw == xy & ew == ey) {
-        
-        # get predictions from the Y | X, E, Z model!
-        ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]][tst] <-
-          pred_xgb(mod_y_xez, data[tst, c(X, E, Z)], 
-                   intervention = c(xw, ew), X = c(X, E))
-      } else {
-        
-        # re-fitting needed
-        y_tilde <- pred_xgb(mod_y_xezw, data[val, c(X, E, Z, W)],
-                            intervention = c(xy, ey), X = c(X, E))
-        
-        mod_nested <- cv_xgb(data[val, c(X, E, Z)], y_tilde, ...)
-        ey_nest[[xw+1]][[ew+1]][[xy+1]][[ey+1]][tst] <- 
-          pred_xgb(mod_nested, data[tst, c(X, E, Z)], 
-                   intervention = c(xw, ew), X = c(X, E))
-      }
-    }
-  }
-  
-  list(
-    y_xezw = y_xezw,
-    ey_nest = ey_nest,
-    px_z = px_z,
-    px_zw = px_zw,
-    pe_xzw = pe_xzw,
-    pe_xz = pe_xz
-  )
-}
-
-one_step_debias <- function(data, X, Z, W, Y, E, nested_mean = "refit",
-                            eps_trim = 0, return_pos = FALSE, ...) {
-  
-  cfit <- cross_fit(data, X, Z, W, Y, E, nested_mean, log_risk, ...)
-  pso <- pso_diff(cfit, data, X, Z, W, Y, E, ...)
+  cfit <- cross_fit_env(data, X, Z, W, Y, E, nested_mean, log_risk, ...)
+  pso <- pso_diff_env(cfit, data, X, Z, W, Y, E, ...)
   
   # get extreme propensity weights
   extrm_pxez <- extrm_pxezw <- rep(FALSE, nrow(data))
@@ -417,7 +417,7 @@ one_step_debias <- function(data, X, Z, W, Y, E, nested_mean = "refit",
     return(pso)
   }
   
-  ias <- measure_spec()
+  ias <- measure_spec_env()
   
   res <- c()
   for (i in seq_along(ias)) {

@@ -15,7 +15,7 @@ nsamp = 2
 # sample n samp rows from original data, with weights
 df = df.sample(n=nsamp, weights=df["weight"], replace=False).reset_index(drop=True)
 
-# need SFM groupppings
+# need SFM groupings
 var_groups = {
     "": [],
     "XZ": sfm["X"] + sfm["Z"],

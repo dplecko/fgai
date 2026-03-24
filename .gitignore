@@ -1,0 +1,6 @@
+*.pdf
+.Rproj.user
+*.Rproj
+*.parquet
+*.csv
+*.png
