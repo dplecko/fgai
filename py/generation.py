@@ -1,3 +1,4 @@
+import os
 import re
 import string
 import torch
@@ -31,10 +32,12 @@ def unknown_facts(uvar_dict):
 
 
 # make the variable list in prompt
-def varlist_to_prompt(var_dict, var_names):
+def varlist_to_prompt(var_dict, var_names, context=None):
 
+    ctx_line = f"CONTEXT: {context}\n" if context else ""
     prompt_start = (
         "You are a data generator. Follow the rules strictly.\n"
+        + ctx_line +
         "RULES:\n"
         "1) Write a single narrative enclosed in <story>...</story>.\n"
         "2) Do NOT include headings, lists, analysis, or any text outside the tags.\n"
@@ -74,93 +77,107 @@ def extract_tag(text: str, tag: str = "story") -> str:
     return text.strip()
 
 
+def _save_parquet(records, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    pd.DataFrame(records).to_parquet(path, index=False)
+
+
 @torch.inference_mode()
 def gen_data_batched(
     df=None,
     var_dict=None,
     var_names=None,
+    context=None,
     nsamp: int = 100,
     model=None,
     tokenizer=None,
     device=None,
     max_new_tokens: int = 256,
     temperature: float = 1,
-    top_p: float = 0.9,
-    batch_size: int = 16,  # tune per GPU memory
+    top_p: float = 1.0,
+    batch_size: int = 16,  # used by transformers engine only
+    engine: str = "transformers",
+    cache_path: str = None,
 ):
-
-    # 0) check if df is given; if so, build prompts from it
+    # 0) build prompts
     if df is not None:
         nsamp = df.shape[0]
         known_vars = df.columns.tolist()
-        # construct the var_dict; known values are replaced by the df values and prompt is constructed per row
         prompts = []
         for i in range(nsamp):
             dyn_dict = var_dict.copy()
             for var in known_vars:
                 dyn_dict[var] = [str(df.loc[i, var])]
-            prompt_i = varlist_to_prompt(dyn_dict, var_names)
-            prompts.append(prompt_i)
+            prompts.append(varlist_to_prompt(dyn_dict, var_names, context=context))
     else:
-        prompt = varlist_to_prompt(var_dict, var_names)
+        prompt = varlist_to_prompt(var_dict, var_names, context=context)
         prompts = [prompt for _ in range(nsamp)]
 
-    # 1) Build all prompts up front (vectorized)
     out_texts = []
 
-    # 2) Process in batches
-    for i in tqdm(range(0, len(prompts), batch_size), desc="Generating (batched)"):
-        batch_prompts = prompts[i : i + batch_size]
-
-        # Tokenize with padding; keep per-sample lengths for slicing
-        enc = tokenizer(
-            batch_prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=False,
-        )
-        input_ids = enc["input_ids"].to(device)
-        attention_mask = enc["attention_mask"].to(device)
-        input_lens = attention_mask.sum(dim=1)  # effective prompt lengths per sample
-
-        # Generate
-        gen = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            do_sample=True,
+    if engine == "vllm":
+        from vllm import SamplingParams
+        sp = SamplingParams(
             temperature=temperature,
             top_p=top_p,
-            num_return_sequences=1,
-            max_new_tokens=max_new_tokens,
-            repetition_penalty=1.05,  # NOTE: what is this for?
-            eos_token_id=getattr(tokenizer, "eos_token_id", None),
-            pad_token_id=getattr(
-                tokenizer,
-                "pad_token_id",
-                getattr(tokenizer, "eos_token_id", None),
-            ),
-            use_cache=True,
+            max_tokens=max_new_tokens,
         )
-
-        # 3) Slice out continuations per-sample and decode
-        for j in range(gen.size(0)):
-            ilen = int(input_lens[j].item())
-            seq = gen[j, ilen:] if gen.size(1) > ilen else gen[j]
-            raw = tokenizer.decode(seq, skip_special_tokens=True).strip()
-
-            # check if the raw output starts with a proper <story> tag
+        outputs = model.generate(prompts, sp)
+        for output in outputs:
+            raw = output.outputs[0].text.strip()
             story = re.sub(r"<[^>]+>|{[^}]+}", "", raw)
-
-            # hard cap ~200 words as guard
             words = story.split()
             if len(words) > 200:
                 story = " ".join(words[:200]).rstrip()
-
             out_texts.append(story)
 
-        # free some memory sooner
-        del enc, input_ids, attention_mask, gen
-        torch.cuda.empty_cache()
+    else:  # transformers
+        for i in tqdm(range(0, len(prompts), batch_size), desc="Generating (batched)"):
+            batch_prompts = prompts[i : i + batch_size]
+
+            enc = tokenizer(
+                batch_prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=False,
+            )
+            input_ids = enc["input_ids"].to(device)
+            attention_mask = enc["attention_mask"].to(device)
+            input_lens = attention_mask.sum(dim=1)
+
+            gen = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                do_sample=True,
+                temperature=temperature,
+                top_p=top_p,
+                num_return_sequences=1,
+                max_new_tokens=max_new_tokens,
+                eos_token_id=getattr(tokenizer, "eos_token_id", None),
+                pad_token_id=getattr(
+                    tokenizer,
+                    "pad_token_id",
+                    getattr(tokenizer, "eos_token_id", None),
+                ),
+                use_cache=True,
+            )
+
+            for j in range(gen.size(0)):
+                ilen = int(input_lens[j].item())
+                seq = gen[j, ilen:] if gen.size(1) > ilen else gen[j]
+                raw = tokenizer.decode(seq, skip_special_tokens=True).strip()
+                story = re.sub(r"<[^>]+>|{[^}]+}", "", raw)
+                words = story.split()
+                if len(words) > 200:
+                    story = " ".join(words[:200]).rstrip()
+                out_texts.append(story)
+
+            del enc, input_ids, attention_mask, gen
+            torch.cuda.empty_cache()
+
+    if cache_path is not None:
+        records = [{"prompt": p, "response": t} for p, t in zip(prompts, out_texts)]
+        _save_parquet(records, cache_path)
 
     return out_texts
 
@@ -193,7 +210,6 @@ def prep_ann_prompt(text, var_name, levels):
     # clean from any appearance of "{" or "}" which may break format
     text = re.sub(r"{|}", "", text)
 
-    # make this conditional with try and except with a breakpoint() if it fails
     try:
         prompt = (
             "Input: Based on the following text:\n\n"
@@ -209,49 +225,86 @@ def prep_ann_prompt(text, var_name, levels):
     return prompt, answer_mapping
 
 
-def annotate_data(model, tokenizer, device, texts, var_dict, var_ord):
+def annotate_data(model, tokenizer, device, texts, var_dict, var_ord,
+                  engine: str = "transformers", cache_path: str = None):
 
-    # initiate a data.frame to hold the results
     df = pd.DataFrame(columns=var_dict.keys())
+    cache_records = []
 
-    # for loop over all texts
-    for var, levels in tqdm(var_dict.items(), desc="Annotating data"):
+    if engine == "vllm":
+        from vllm import SamplingParams
+        vllm_tokenizer = model.get_tokenizer()
 
-        _, answer_mapping = prepare_answers(levels)
+        for var, levels in tqdm(var_dict.items(), desc="Annotating data"):
+            _, answer_mapping = prepare_answers(levels)
+            letters = list(answer_mapping.keys())
+            letter_ids = [vllm_tokenizer.convert_tokens_to_ids(l) for l in letters]
 
-        for i, text in enumerate(texts):
-            # extract relevant variables from var_dict
+            ann_prompts = [prep_ann_prompt(text, var, levels)[0] for text in texts]
+            sp = SamplingParams(max_tokens=1, temperature=0, allowed_token_ids=letter_ids)
+            outputs = model.generate(ann_prompts, sp)
 
-            inputs = tokenizer(
-                prep_ann_prompt(text, var, levels)[0], return_tensors="pt"
-            ).to(device)
-            level_ids = [
-                [tokenizer.convert_tokens_to_ids(tok) for tok in ans]
-                for ans in answer_mapping.keys()
-            ]
+            for i, output in enumerate(outputs):
+                letter = output.outputs[0].text.strip().upper()
+                pred_answer = answer_mapping.get(letter, levels[0])
+                df.loc[i, var] = pred_answer
 
-            with torch.no_grad():
-                outputs = model(**inputs).logits
-                next_token_logits = outputs[
-                    :, -1, :
-                ]  # Last token in the input sequence
-                probs = torch.softmax(next_token_logits, dim=-1)
+                if cache_path is not None:
+                    cache_records.append({
+                        "variable": var,
+                        "prompt": ann_prompts[i],
+                        "response": letter,
+                    })
 
-            # Normalise probability mass over the provided answers
-            level_probs = [
-                sum(probs[0, tid].item() for tid in ids) for ids in level_ids
-            ]
+            df[var] = pd.Categorical(df[var], categories=levels, ordered=var_ord[var])
 
-            # get the predicted answer from the list
-            pred_idx = max(range(len(level_probs)), key=level_probs.__getitem__)
-            pred_answer = answer_mapping[list(answer_mapping.keys())[pred_idx]]
+    else:  # transformers
+        for var, levels in tqdm(var_dict.items(), desc="Annotating data"):
 
-            # save the answer to the data frame for the i-th
-            df.loc[i, var] = pred_answer
+            _, answer_mapping = prepare_answers(levels)
 
-        # ensure that the variable is categorical with correct levels
-        df[var] = pd.Categorical(df[var], categories=levels, ordered=var_ord[var])
+            for i, text in enumerate(texts):
+                ann_prompt, _ = prep_ann_prompt(text, var, levels)
+                inputs = tokenizer(ann_prompt, return_tensors="pt").to(device)
+                level_ids = [
+                    [tokenizer.convert_tokens_to_ids(tok) for tok in ans]
+                    for ans in answer_mapping.keys()
+                ]
 
+                with torch.no_grad():
+                    outputs = model(**inputs).logits
+                    next_token_logits = outputs[:, -1, :]
+                    probs = torch.softmax(next_token_logits, dim=-1)
+
+                level_probs = [
+                    sum(probs[0, tid].item() for tid in ids) for ids in level_ids
+                ]
+
+                pred_idx = max(range(len(level_probs)), key=level_probs.__getitem__)
+                pred_answer = answer_mapping[list(answer_mapping.keys())[pred_idx]]
+                df.loc[i, var] = pred_answer
+
+                if cache_path is not None:
+                    cache_records.append({
+                        "variable": var,
+                        "prompt": ann_prompt,
+                        "response": list(answer_mapping.keys())[pred_idx],
+                    })
+
+            df[var] = pd.Categorical(df[var], categories=levels, ordered=var_ord[var])
+
+    if cache_path is not None:
+        _save_parquet(cache_records, cache_path)
+
+    return df
+
+
+# enforce levels helper
+def enforce_levels(df, var_dict, var_ord):
+    """Ensure all columns have the same categorical levels as the source data."""
+    for var, levels in var_dict.items():
+        if var in df.columns:
+            df[var] = pd.Categorical(df[var], categories=levels, ordered=var_ord[var])
     return df
 
 

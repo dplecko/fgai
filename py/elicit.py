@@ -1,185 +1,171 @@
-# nohup python workspace/elicit.py > fgai_elicit.log 2>&1 &
+# nohup python workspace/elicit.py --model llama3_8b --batch 1 > logs/elicit_llama3_8b.log 2>&1 &
+import argparse
+import torch
 from py.common import *
-from py.model_load import MODEL_PATHS
+from py.model_load import MODEL_PATHS, get_model, get_vllm_model, model_batchsize
 from py.generation import *
 from py.data_helpers import load_data
 
-dataset = "nsduh"
-df, var_dict, var_names, var_ord, sfm = load_data(dataset)
+parser = argparse.ArgumentParser()
+parser.add_argument("--model", type=str, default="llama3_8b")
+parser.add_argument("--ann_model", type=str, default=None,
+                    help="Annotator model name (defaults to --model)")
+parser.add_argument("--engine", type=str, default="transformers",
+                    choices=["transformers", "vllm"])
+parser.add_argument(
+    "--batch", type=int, default=1, help="1 = rows 0:8192, 2 = rows 8192:16384"
+)
+args = parser.parse_args()
 
-model_name = "llama3_8b_instruct"
-model_path = MODEL_PATHS[model_name][0]
-model, tokenizer, device = get_model(model_path, prefer_gpu_idx=0)
+# --- settable directly for interactive use ---
+model_name     = args.model           # e.g. model_name = "llama3_8b"
+ann_model_name = args.ann_model or model_name  # e.g. ann_model_name = "llama3_8b"
+engine         = args.engine          # e.g. engine = "vllm"
+batch_num      = args.batch
+# --------------------------------------------
 
-nsamp = 2
-# sample n samp rows from original data, with weights
-df = df.sample(n=nsamp, weights=df["weight"], replace=False).reset_index(drop=True)
+BATCH_SIZE = 8192
+same_model = (ann_model_name == model_name)
 
-# need SFM groupings
-var_groups = {
-    "": [],
-    "XZ": sfm["X"] + sfm["Z"],
-    "XZW": sfm["X"] + sfm["Z"] + sfm["W"],
-    "XZWY": sfm["X"] + sfm["Z"] + sfm["W"] + sfm["Y"],
-}
+datasets = [
+    "nsduh",
+    "brfss",
+    "census_income",
+]
 
-# iterate over var_groups and create the data
-envs_data = []
-envs_text = []
-for group_name, vars in var_groups.items():
-    if group_name == "":
-        df_sub = None
-    elif group_name == "XZWY":
-        envs_data.append(df[vars])
-        clean_cats(df[vars], X=["race"]).to_parquet(
-            f"data/{dataset}_{model_name}_{group_name}.parquet",
-            index=False,
-        )
-        continue
+# ── preload all dataset info ────────────────────────────────────────────────
+dataset_info = {}
+for dataset in datasets:
+    df, var_dict, var_names, var_ord, sfm, context = load_data(dataset)
+    df = df.sample(
+        n=2 * BATCH_SIZE, weights=df["weight"], replace=True, random_state=0
+    ).reset_index(drop=True)
+    start = (batch_num - 1) * BATCH_SIZE
+    df = df.iloc[start : start + BATCH_SIZE].reset_index(drop=True)
+    var_groups = {
+        "": [],
+        "XZ": sfm["X"] + sfm["Z"],
+        "XZW": sfm["X"] + sfm["Z"] + sfm["W"],
+        "XZWY": sfm["X"] + sfm["Z"] + sfm["W"] + sfm["Y"],
+    }
+    dataset_info[dataset] = dict(
+        df=df, var_dict=var_dict, var_names=var_names, var_ord=var_ord,
+        sfm=sfm, context=context, var_groups=var_groups,
+    )
+
+torch.manual_seed(2025 + batch_num)
+
+
+# ── PHASE 1: generation ─────────────────────────────────────────────────────
+def _load_model(name):
+    path = MODEL_PATHS[name]
+    if engine == "transformers":
+        return get_model(path)          # (model, tokenizer, device)
     else:
-        df_sub = df[vars]
-
-    texts = gen_data_batched(
-        df_sub,
-        var_dict,
-        var_names,
-        nsamp,
-        model,
-        tokenizer,
-        device,
-        batch_size=1,
-    )
-    envs_text.append(texts)
-
-    # subset the dictionary to include variables not in vars
-    var_dict_sub = {k: v for k, v in var_dict.items() if k not in vars}
-    # annotate variables that are not known
-    df_ann = annotate_data(model, tokenizer, device, texts, var_dict_sub, var_ord)
-    # merge the annotated data with the original data
-    df_s = (
-        df_ann
-        if group_name == ""
-        else pd.concat(
-            [df_sub.reset_index(drop=True), df_ann.reset_index(drop=True)], axis=1
-        )
-    )
-    envs_data.append(df_s)
-
-    clean_cats(df_s, X=["race"]).to_parquet(
-        f"data/{dataset}_{model_name}_{group_name}.parquet",
-        index=False,
-    )
-
-# inspect the census data
-df = pd.read_parquet("data/raw/census.parquet")
-
-# save the intermediate texts list to a pickle file
-# import pickle
-
-# Save and read envs_text and envs_data as a single dictionary to/from a pickle file
-# envs_dict = {"envs_text": envs_text, "envs_data": envs_data}
-
-# # Save the dictionary to a pickle file
-# with open(f"data/fgai/{dataset}_envs.pkl", "wb") as f:
-#     pickle.dump(envs_dict, f)
-
-# # Load the dictionary from the pickle file
-# with open(f"data/fgai/{dataset}_envs.pkl", "rb") as f:
-#     envs_dict = pickle.load(f)
-
-# Extract envs_text and envs_data from the loaded dictionary
-# envs_text = envs_dict["envs_text"]
-# envs_data = envs_dict["envs_data"]
-
-# df_m = annotate_data(model, tokenizer, device, texts, var_dict)
-
-# # go over all columns in df, and if they are categorical, make df_m inherit their category and order
-# for col in df.columns:
-#     if col in df_m.columns:
-#         dt = df[col].dtype
-#         if isinstance(dt, pd.CategoricalDtype):
-#             df_m[col] = pd.Categorical(
-#                 df_m[col], categories=df[col].cat.categories, ordered=dt.ordered
-#             )
-
-# # rbind the two dataframes, and add a binary 0/1 env column
-# df_m["env"] = 1
-# df_w["env"] = 0
-# df_cmb = pd.concat([df_m, df_w], ignore_index=True)
+        return get_vllm_model(path), None, None
 
 
-# df_res = clean_cats(df_cmb, X=["race"])
-# df_res.to_parquet("data/fgai/{dataset}_envs.parquet", index=False)
-
-# # auditing the model labels
-# import pickle
-
-# with open("data/fgai/nsduh_fgai_texts.pkl", "rb") as f:
-#     texts = pickle.load(f)
-
-# df_m = pd.read_parquet("data/fgai/nsduh_envs.parquet")
-# df_m = df_m[df_m["env"] == 1].reset_index(drop=True)
-
-# # sample 10 random rows to inspect
-# import random
-
-# random.seed(42)
-# sample_indices = random.sample(range(len(texts)), 10)
-
-# sample_indices = [1824, 409, 4506, 4012, 3657, 2286, 1679, 8935, 1424, 9674]
-
-# print(texts[sample_indices[3]])
-
-# idx = 9674
-# print(texts[idx])
-# # need to convert the levels back to original labels
-# for var in df_m.columns:
-#     if var in ["age", "edu", "income"]:
-#         print(var, df[var].cat.categories[df_m.loc[idx, var] - 1])
-#     elif var in ["sex"]:
-#         print(var, df[var].cat.categories[df_m.loc[idx, var]])
-#     else:
-#         print(var, df_m.loc[idx, var])
-
-# # automated checking
+def _unload_model(model):
+    del model
+    if engine == "transformers":
+        torch.cuda.empty_cache()
 
 
-# # load the data from fgai/data/story-truth.csv
-# df_truths = pd.read_csv("../fgai/data/story-truth.csv")
+print("=== Phase 1: Generation ===")
+gen_model, gen_tokenizer, gen_device = _load_model(model_name)
 
-# # verify that each column value is in the correct levels
-# for var in df_truths.columns:
+generated = {}  # (dataset, group_name) -> texts
 
-#     if var not in var_dict:
-#         continue
+for dataset in datasets:
+    info = dataset_info[dataset]
+    df, var_dict, var_names = info["df"], info["var_dict"], info["var_names"]
+    context, var_groups = info["context"], info["var_groups"]
+    nsamp = len(df)
+    print(f"\n  {dataset} (batch {batch_num})")
 
-#     # correct levels
-#     levels = var_dict[var]
+    for group_name, vars in var_groups.items():
+        if group_name == "XZWY":
+            continue  # no generation needed
 
-#     # check if all values in df_truths[var] are in levels
-#     invalid_values = set(df_truths[var].unique()) - set(levels)
-#     if len(invalid_values) > 0:
-#         print(f"Variable {var} has invalid values: {invalid_values}")
+        df_sub = df[vars] if group_name != "" else None
+        gen_cache = f"data/cache/{dataset}_{model_name}_{group_name}_gen.parquet"
 
-# # get the automatic check
-# for i in range(len(df_truths)):
+        # skip generation if this batch's texts are already cached
+        texts = None
+        if os.path.exists(gen_cache):
+            cached = pd.read_parquet(gen_cache)
+            if len(cached) >= batch_num * BATCH_SIZE:
+                start = (batch_num - 1) * BATCH_SIZE
+                texts = cached["response"].iloc[start : start + BATCH_SIZE].tolist()
+                print(f"    [{group_name}] loaded {len(texts)} texts from cache, skipping generation")
 
-#     idx = df_truths.loc[i, "index"]
+        if texts is None:
+            # save previous batches before gen_data_batched overwrites the cache
+            prev_cache = pd.read_parquet(gen_cache) if os.path.exists(gen_cache) else None
+            texts = gen_data_batched(
+                df_sub, var_dict, var_names, context, nsamp,
+                gen_model, gen_tokenizer, gen_device,
+                batch_size=model_batchsize(model_name) if engine == "transformers" else 1,
+                engine=engine,
+                cache_path=gen_cache,
+            )
+            # accumulate cache across batches
+            if prev_cache is not None:
+                pd.concat([prev_cache, pd.read_parquet(gen_cache)], ignore_index=True).to_parquet(gen_cache, index=False)
 
-#     for var in df_truths.columns:
-#         if var not in var_dict:
-#             continue
+        generated[(dataset, group_name)] = texts
 
-#         true_value = df_truths.loc[i, var]
+# unload gen model before loading ann model (if they differ)
+if not same_model:
+    print("\nUnloading generation model from VRAM...")
+    _unload_model(gen_model)
+    del gen_model
 
-#         if var in ["age", "edu", "income"]:
-#             pred_value = df[var].cat.categories[df_m.loc[idx, var] - 1]
-#         elif var in ["sex", "alc_monthly", "cig_monthly", "mj_monthly", "coc_ever"]:
-#             pred_value = df[var].cat.categories[df_m.loc[idx, var]]
-#         else:
-#             pred_value = df_m.loc[idx, var]
 
-#         if true_value != pred_value:
-#             print(
-#                 f"Row {i}, Variable {var}: true value = {true_value}, predicted value = {pred_value}"
-#             )
+# ── PHASE 2: annotation + save ──────────────────────────────────────────────
+print("\n=== Phase 2: Annotation ===")
+
+if same_model:
+    ann_model, ann_tokenizer, ann_device = gen_model, gen_tokenizer, gen_device
+else:
+    ann_model, ann_tokenizer, ann_device = _load_model(ann_model_name)
+
+for dataset in datasets:
+    info = dataset_info[dataset]
+    df, var_dict, var_ord = info["df"], info["var_dict"], info["var_ord"]
+    var_groups = info["var_groups"]
+    nsamp = len(df)
+    print(f"\n  {dataset} (batch {batch_num})")
+
+    for group_name, vars in var_groups.items():
+        out_path  = f"data/{dataset}_{model_name}_{group_name}.parquet"
+        ann_cache = f"data/cache/{dataset}_{model_name}_{ann_model_name}_{group_name}_ann.parquet"
+
+        if group_name == "XZWY":
+            df_new = enforce_levels(df[vars].copy(), var_dict, var_ord)
+        else:
+            df_sub = df[vars] if group_name != "" else None
+            texts  = generated[(dataset, group_name)]
+            var_dict_sub = {k: v for k, v in var_dict.items() if k not in vars}
+
+            df_ann = annotate_data(
+                ann_model, ann_tokenizer, ann_device,
+                texts, var_dict_sub, var_ord,
+                engine=engine,
+                cache_path=ann_cache,
+            )
+            df_new = (
+                df_ann if group_name == ""
+                else pd.concat(
+                    [df_sub.reset_index(drop=True), df_ann.reset_index(drop=True)],
+                    axis=1,
+                )
+            )
+            df_new = enforce_levels(df_new, var_dict, var_ord)
+
+        if batch_num > 1 and os.path.exists(out_path):
+            df_prev = pd.read_parquet(out_path)
+            df_new = pd.concat([df_prev, df_new], ignore_index=True)
+
+        df_new.to_parquet(out_path, index=False)
+        print(f"    Saved {out_path} ({len(df_new)} rows)")
