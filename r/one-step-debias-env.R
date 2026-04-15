@@ -27,7 +27,7 @@ cv_xgb_env <- function(df, y, weights = NULL, ...) {
   xgb <- xgb.train(
     params = params,
     data = dtrain,
-    nrounds = cv$best_iteration,
+    nrounds = cv$early_stop$best_iteration,
     verbose = FALSE, ...
   )
   attr(xgb, "binary") <- binary
