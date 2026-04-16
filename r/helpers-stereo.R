@@ -95,22 +95,20 @@ write_stereotype_latex <- function(scores_dt, file,
   models <- sort(unique(scores_dt$model))
   
   if (include_advantage) {
-    tabular_spec <- "l ccc ccc"
+    tabular_spec  <- "l ccc ccc"
     multicol_line <- " & \\multicolumn{3}{c}{\\textbf{Disadvantage}} & \\multicolumn{3}{c}{\\textbf{Advantage}} \\\\"
     cmidrule_line <- "\\cmidrule(lr){2-4} \\cmidrule(lr){5-7}"
-    header_line <- "\\textbf{Model} & Amplify & Dampen & Reverse & Amplify & Dampen & Reverse \\\\"
+    header_line   <- "\\textbf{Model} & Amplify & Dampen & Reverse & Amplify & Dampen & Reverse \\\\"
   } else {
-    tabular_spec <- "l ccc"
-    multicol_line <- " & \\multicolumn{3}{c}{\\textbf{Disadvantage}} \\\\"
-    cmidrule_line <- "\\cmidrule(lr){2-4}"
-    header_line <- "\\textbf{Model} & Amplify & Dampen & Reverse \\\\"
+    tabular_spec  <- "l ccc"
+    multicol_line <- NULL
+    cmidrule_line <- NULL
+    header_line   <- "\\textbf{Model} & Amp. & Damp. & Rev. \\\\"
   }
   
   lines <- c(
     "\\begin{table}[t]",
     "\\centering",
-    f("\\caption{<<caption>>}", .open = "<<", .close = ">>"),
-    f("\\label{<<label>>}", .open = "<<", .close = ">>"),
     f("\\begin{tabular}{<<tabular_spec>>}", .open = "<<", .close = ">>"),
     "\\toprule",
     multicol_line,
@@ -130,7 +128,77 @@ write_stereotype_latex <- function(scores_dt, file,
     lines <- c(lines, paste0(label_m, " & ", paste(cells, collapse = " & "), " \\\\"))
   }
   
-  lines <- c(lines, "\\bottomrule", "\\end{tabular}", "\\end{table}")
+  lines <- c(
+    lines, 
+    "\\bottomrule", 
+    "\\end{tabular}", 
+    f("\\caption{<<caption>>}", .open = "<<", .close = ">>"),
+    f("\\label{<<label>>}", .open = "<<", .close = ">>"),
+    "\\end{table}"
+  )
+  writeLines(paste(lines, collapse = "\n"), file)
+  message("Written: ", file)
+}
+
+# --- real-world discrimination table ----------------------------------------
+
+#' Summary table of DE/IE/SE in the real world, per dataset.
+#' Cells: value% $\pm$ sd% (rounded 1dp).
+#' Color: blue = disadvantage (value > 0), green = advantage (value < 0).
+#'        lighter shade if |value| < 1.96 * sd (not significant).
+#'
+#' Requires \usepackage{booktabs, colortbl, xcolor}.
+write_world_latex <- function(eff, file,
+                              caption = "Real-world discrimination.",
+                              label = "tab:world") {
+  
+  dt <- unique(eff[stage == "world" & ce %in% c("de", "ie", "se"),
+                   .(dataset, ce, value, sd)])
+  
+  # census_income: sign is flipped (positive value means advantage for X=x1)
+  dt[dataset == "census_income", value := -value]
+  
+  # rename datasets
+  dt[, dataset := DATASET_NAMES[dataset]]
+  
+  fmt_cell <- function(v, s) {
+    sig   <- abs(v) >= 1.96 * s
+    col   <- if (v > 0) "blue" else "green"
+    shade <- if (sig) 40 else 15
+    sprintf("\\cellcolor{%s!%d}$%.1f \\%%\\pm %.1f$ \\%%",
+            col, shade, 100 * v, 100 * s)
+  }
+  
+  wide <- dcast(dt, dataset ~ ce, value.var = c("value", "sd"))
+  
+  datasets_used <- unique(dt$dataset)
+  
+  lines <- c(
+    "\\begin{table}[t]",
+    "\\centering",
+    "\\setstretch{1.4}",
+    "\\begin{tabular}{l | c|c|c}",
+    "\\toprule",
+    "\\textbf{Dataset} & Direct & Indirect & Spurious \\\\",
+    "\\midrule"
+  )
+  
+  for (ds in datasets_used) {
+    row <- wide[dataset == ds]
+    cells <- sapply(c("de", "ie", "se"), function(c)
+      fmt_cell(row[[paste0("value_", c)]], row[[paste0("sd_", c)]]))
+    label_ds <- gsub("_", "\\_", ds, fixed = TRUE)
+    lines <- c(lines, paste0(label_ds, " & ", paste(cells, collapse = " & "), " \\\\"))
+  }
+  
+  lines <- c(
+    lines, "\\bottomrule", 
+    "\\end{tabular}",
+    "\\vspace{0.1in}",
+    f("\\caption{<<caption>>}", .open = "<<", .close = ">>"),
+    f("\\label{<<label>>}",    .open = "<<", .close = ">>"),
+    "\\end{table}"
+  )
   writeLines(paste(lines, collapse = "\n"), file)
   message("Written: ", file)
 }

@@ -1,14 +1,19 @@
+
 library(arrow)
 library(xgboost)
-library(ggplot2)
 library(data.table)
+library(ggplot2)
 library(ggpattern)
-library(latex2exp)
+library(ggdendro)
 library(ggtext)
+library(latex2exp)
 library(glue)
 library(withr)
+
 f <- function(...) as.character(glue::glue(..., .envir = parent.frame()))
+
 expit <- function(x) exp(x) / (1 + exp(x))
+
 sync_data <- function() {
   dataset <- "fgai"
   remote <- "ault"
@@ -19,6 +24,10 @@ sync_data <- function() {
 }
 
 DATASETS <- c("nsduh", "brfss", "census_income")
+
+DATASET_NAMES <- c(nsduh = "NSDUH (Marijuana)", brfss = "BRFSS (Diabetes)", 
+                   census_income = "ACS Census (Income)")
+
 MODELS <- c("llama3_8b", "ministral3_8b", "gemma3_4b", "qwen35_9b",
             "deepseek_7b", "phi4", "qwen35_27b", "gemma3_27b", "deepseek_r1", 
             "llama3_70b")

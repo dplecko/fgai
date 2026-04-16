@@ -40,3 +40,12 @@ write_stereotype_latex(
 )
 
 fwrite(scores_all, "results/scores-all.csv")
+
+# --- real-world discrimination table ----------------------------------------
+
+write_world_latex(
+  eff_all,
+  "results/world-table.tex",
+  caption = "Real-world discrimination across datasets (\\%).",
+  label = "tab:world"
+)

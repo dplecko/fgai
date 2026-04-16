@@ -32,6 +32,15 @@ load_model_data <- function(dataset, model) {
       df <- as.data.frame(read_parquet(file.path("data", fl)))
       df <- df[df[[X_var]] %in% X_keep, ]
       df[[X_var]] <- as.integer(df[[X_var]] == X_ref)
+      
+      if (dataset == "census_income") {
+        
+        df[["salary_group"]] <- factor(
+          ifelse(df[["salary_group"]] >= "50001–75000 $", "yes", "no"),
+          levels = c("no", "yes")
+        )
+      }
+      
       df
     }
   )

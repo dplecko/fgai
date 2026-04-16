@@ -34,7 +34,7 @@ mat_all <- to_9d_matrix(eff_all)
 mds_all <- run_mds(dist_l1(mat_all))
 mds_all[, model := MODEL_NAMES[model]]
 ggsave("results/mds-all.png",
-       plot = plot_mds(mds_all, title = "Model Similarity (all datasets)"),
+       plot = plot_mds(mds_all, title = NULL),
        width = 7, height = 5)
 
 # --- heatmap (upper triangle only) ------------------------------------------
@@ -64,25 +64,21 @@ p_heat <- ggplot(dt, aes(model2, model1, fill = distance)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   labs(x = NULL, y = NULL, fill = "L1 distance")
 
-ggsave("results/heatmap-all.png", plot = p_heat, width = 8, height = 7)
+ggsave("results/heatmap-all.png", plot = p_heat, width = 7, height = 5)
 
 # --- dendrogram -------------------------------------------------------------
 
-library(ggdendro)
-
-D  <- dist_l1(mat_all)
-hc <- hclust(D, method = "ward.D2")
 hc$labels <- MODEL_NAMES[hc$labels]
 
 p_dendro <- ggdendrogram(hc, rotate = FALSE, theme_dendro = FALSE) +
-  labs(x = NULL, y = "L1 distance", title = "Bias Similarity") +
-  theme_bw() +
+  labs(x = NULL, y = "L1 distance") +
+  theme_bw(base_size = 16) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         panel.grid.major.x = element_blank(),
         panel.grid.minor = element_blank())
 
 ggsave("results/dendrogram-all.png", plot = p_dendro,
-       width = 8, height = 5)
+       width = 7, height = 5)
 
 # # checking by family
 # ggplot(

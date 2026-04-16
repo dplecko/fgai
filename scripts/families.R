@@ -48,19 +48,6 @@ nn_hits <- function(D, labels) {
   sum(labels == labels[nn_idx] & fam_size > 1)
 }
 
-#' Mean sibling rank for models with siblings.
-mean_sibling_rank <- function(D, labels) {
-  fam_size <- table(labels)[labels]
-  has_sib  <- fam_size > 1
-  ranks <- numeric(0)
-  for (i in which(has_sib)) {
-    ord  <- order(D[i, ])
-    sibs <- which(labels == labels[i] & seq_along(labels) != i)
-    ranks <- c(ranks, min(match(sibs, ord)))
-  }
-  mean(ranks)
-}
-
 mean_within_l1 <- function(D, labels) {
   fam_size <- table(labels)[labels]
   has_sib  <- fam_size > 1
@@ -75,33 +62,27 @@ mean_within_l1 <- function(D, labels) {
 # --- observed ---------------------------------------------------------------
 
 obs_hits <- nn_hits(D_mat, family_labels)
-obs_rank <- mean_sibling_rank(D_mat, family_labels)
 obs_l1  <- mean_within_l1(D_mat, family_labels)
 
 # --- permutation -------------------------------------------------------------
 
 set.seed(2026)
-null_hits <- numeric(N_PERM)
-null_rank <- numeric(N_PERM)
-
-for (i in seq_len(N_PERM)) {
-  perm <- sample(family_labels)
-  null_hits[i] <- nn_hits(D_mat, perm)
-  null_rank[i] <- mean_sibling_rank(D_mat, perm)
-}
 
 null_l1 <- replicate(N_PERM, mean_within_l1(D_mat, sample(family_labels)))
 
+null_hits <- numeric(N_PERM)
+for (i in seq_len(N_PERM)) {
+  perm <- sample(family_labels)
+  null_hits[i] <- nn_hits(D_mat, perm)
+}
+
 # --- p-values ---------------------------------------------------------------
-
-# NN hits: right-tail (more hits = stronger family signal)
-p_hits <- mean(null_hits >= obs_hits)
-
-# Sibling rank: left-tail (lower rank = siblings closer than random)
-p_rank <- mean(null_rank <= obs_rank)
 
 # L1 distance
 p_l1    <- mean(null_l1 <= obs_l1)
+
+# NN hits: right-tail (more hits = stronger family signal)
+p_hits <- mean(null_hits >= obs_hits)
 
 # --- report -----------------------------------------------------------------
 
@@ -116,8 +97,3 @@ cat("NN Hit Count\n")
 cat(f("  observed: {obs_hits}\n"))
 cat(f("  null mean: {round(mean(null_hits), 2)}\n"))
 cat(f("  p-value (right-tail): {round(p_hits, 4)}\n\n"))
-
-cat("Mean Sibling Rank\n")
-cat(f("  observed: {round(obs_rank, 2)}\n"))
-cat(f("  null mean: {round(mean(null_rank), 2)} (expected ~5.0)\n"))
-cat(f("  p-value (left-tail): {round(p_rank, 4)}\n"))

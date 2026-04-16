@@ -76,4 +76,4 @@ scores_dt[model == "qwen35_27b" & dataset == "brfss" & stage == "model"]
 
 # Class 3
 print(surprises[class == "tv_hides_bias"], topn = 161)
-scores_dt[model == "gemma3_4b" & dataset == "brfss" & stage == "fw"]
+scores_dt[model == "gemma3_27b" & dataset == "census_income" & stage == "model"]
