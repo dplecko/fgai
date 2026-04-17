@@ -1,11 +1,15 @@
 
+
+
+dr1 <- read_parquet("data/cache/nsduh_llama3_70b_XZ_gen.parquet")
+
+cat(dr1[100, ][["prompt"]])
+
+cat(dr1[100, ][["response"]])
+
 # looking at annotations manually
-dran <- read_parquet("data/cache/nsduh_llama3_70b_llama3_70b__ann.parquet")
-dr1 <- read_parquet("data/cache/nsduh_llama3_70b__gen.parquet")
+dran <- read_parquet("data/cache/nsduh_llama3_70b_llama3_70b_XZ_ann.parquet")
 
-read_parquet("data/nsduh_deepseek_r1_.parquet")
+cat(dran[100, ][["prompt"]])
 
-cat(dr1[1, ][["prompt"]])
-
-
-cat(dr1[1, ][["response"]])
+cat(dran[100, ][["response"]])

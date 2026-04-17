@@ -2,8 +2,8 @@
 root <- rprojroot::find_root(rprojroot::has_file(".gitignore"))
 invisible(lapply(list.files(file.path(root, "r"), full.names = TRUE), source))
 
-dataset <- "nsduh"
-model   <- "llama3_8b_instruct"
+dataset <- "brfss"
+model   <- "qwen35_27b"
 
 # SFM
 sfm <- load_sfm(dataset)
@@ -12,9 +12,8 @@ X <- sfm$X; Z <- sfm$Z; W <- sfm$W; Y <- sfm$Y
 # --- estimate and extract ----------------------------------------------------
 
 df_lst <- load_model_data(dataset, model)
-meas   <- estimate_within(df_lst, X, Z, W, Y,
+eff    <- estimate_within(df_lst, X, Z, W, Y,
                           dataset = dataset, model = model)
-eff    <- extract_stage_effects(meas)
 
 # --- TV decomposition plot ---------------------------------------------------
 
