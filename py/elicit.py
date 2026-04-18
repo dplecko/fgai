@@ -10,8 +10,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="llama3_8b")
 parser.add_argument("--ann_model", type=str, default=None,
                     help="Annotator model name (defaults to --model)")
-parser.add_argument("--engine", type=str, default="transformers",
-                    choices=["transformers", "vllm"])
+parser.add_argument("--engine", type=str, default="vllm",
+                    choices=["vllm", "transformers"])
 parser.add_argument(
     "--batch", type=int, default=1, help="1 = rows 0:8192, 2 = rows 8192:16384"
 )

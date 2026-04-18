@@ -242,7 +242,6 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
             letter_ids = [vllm_tokenizer.convert_tokens_to_ids(l) for l in letters]
 
             ann_prompts = [prep_ann_prompt(text, var_name, levels)[0] for text in texts]
-            breakpoint()
             sp = SamplingParams(max_tokens=1, temperature=0, allowed_token_ids=letter_ids)
             outputs = model.generate(ann_prompts, sp)
 
