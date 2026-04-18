@@ -225,7 +225,7 @@ def prep_ann_prompt(text, var_name, levels):
     return prompt, answer_mapping
 
 
-def annotate_data(model, tokenizer, device, texts, var_dict, var_ord,
+def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
                   engine: str = "transformers", cache_path: str = None):
 
     df = pd.DataFrame(columns=var_dict.keys())
@@ -236,11 +236,13 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_ord,
         vllm_tokenizer = model.get_tokenizer()
 
         for var, levels in tqdm(var_dict.items(), desc="Annotating data"):
+            var_name = var_names.get(var, var)
             _, answer_mapping = prepare_answers(levels)
             letters = list(answer_mapping.keys())
             letter_ids = [vllm_tokenizer.convert_tokens_to_ids(l) for l in letters]
 
-            ann_prompts = [prep_ann_prompt(text, var, levels)[0] for text in texts]
+            ann_prompts = [prep_ann_prompt(text, var_name, levels)[0] for text in texts]
+            breakpoint()
             sp = SamplingParams(max_tokens=1, temperature=0, allowed_token_ids=letter_ids)
             outputs = model.generate(ann_prompts, sp)
 
@@ -264,7 +266,8 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_ord,
             _, answer_mapping = prepare_answers(levels)
 
             for i, text in enumerate(texts):
-                ann_prompt, _ = prep_ann_prompt(text, var, levels)
+                var_name = var_names.get(var, var)
+                ann_prompt, _ = prep_ann_prompt(text, var_name, levels)
                 inputs = tokenizer(ann_prompt, return_tensors="pt").to(device)
                 level_ids = [
                     [tokenizer.convert_tokens_to_ids(tok) for tok in ans]

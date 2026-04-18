@@ -64,7 +64,7 @@ def load_data(dataset: str):
 
     if "census" in dataset:
         df = pd.read_parquet(f"data/raw/census.parquet")
-        
+
         # categorize education
         education_levels = [
             "No schooling completed",
@@ -95,35 +95,35 @@ def load_data(dataset: str):
         df["education"] = pd.Categorical(
             df["education"], categories=education_levels, ordered=True
         )
-        
+
         # bin age into groups
         df["age_group"] = pd.cut(
             df["age"],
             bins=[0, 24, 34, 44, 54, 64, 74, 79, float("inf")],
             labels=["18-24 years", "25-34 years", "35-44 years", "45-54 years", "55-64 years", "65-74 years", "75-79 years", "80+ years"]
         )
-        
+
         # bin hours worked into <10, 10-20, 20-30, 30-40, 40-50, 50+ hours
         df["hours_worked"] = pd.cut(
             df["hours_worked"],
             bins=[0, 10, 20, 30, 40, 50, float("inf")],
             labels=["<10", "10-20", "20-30", "30-40", "40-50", "50+"]
         )
-        
+
         # bin children into 0, 1, 2, 3, 4, 5+ children
         df["children"] = pd.cut(
             df["children"],
             bins=[-1, 0, 1, 2, 3, 4, float("inf")],
             labels=["0", "1", "2", "3", "4", "5+"]
         )
-        
+
         # bin family size into 1, 2, 3, 4, 5+ family members
         df["family_size"] = pd.cut(
             df["family_size"],
             bins=[0, 1, 2, 3, 4, float("inf")],
             labels=["1", "2", "3", "4", "5+"]
         )
-        
+
         # code doctor and surgeon as binary variables no/yes based on 0/1 values
         df["doctor"] = df["doctor"].apply(lambda x: "yes" if x == 1 else "no")
         df["surgeon"] = df["surgeon"].apply(lambda x: "yes" if x == 1 else "no")
@@ -139,7 +139,7 @@ def load_data(dataset: str):
             df = df[df["employment_status"] == "employed"]
     elif dataset == "brfss":
         df = pd.read_parquet(f"data/raw/brfss.parquet")
-        
+
         # fix education and income ordering
         df["education"] = pd.Categorical(
             df["education"],
@@ -151,7 +151,7 @@ def load_data(dataset: str):
             categories=["<$15k", "$15–25k", "$25–35k", "$35–50k", "$50–100k", "$100k-200k", ">$200k"],
             ordered=True,
         )
-        
+
         # discretize BMI into bins according to WHO
         df["bmi"] = pd.cut(
             df["bmi"],
@@ -159,17 +159,20 @@ def load_data(dataset: str):
             labels=["underweight", "normal", "overweight", 
                     "obese class 1", "obese class 2", "obese class 3"],
         )
-    else: 
+    elif dataset == "nsduh": 
         df = pd.read_parquet(f"data/raw/{dataset}.parquet")
+
+        # filter out age < 18, which includes levels 12-13 years, 14-15 years, and 16-17 years
+        df = df[~df["age"].isin(["12–13 years", "14–15 years", "16–17 years"])].reset_index(drop=True)
 
     var_names = get_var_names(dataset)
     sfm = load_sfm(dataset)
-    
+
     # subset var_names and df to only include variables in sfm
     sfm_vars = sfm["X"] + sfm["Z"] + sfm["W"] + sfm["Y"]
     var_names = {var: name for var, name in var_names.items() if var in sfm_vars}
     df = df[sfm_vars + ["weight"]]
-    
+
     var_ord = {
         var: isinstance(df[var].dtype, pd.CategoricalDtype) and df[var].dtype.ordered
         for var in df.columns
@@ -181,7 +184,7 @@ def load_data(dataset: str):
             var_dict[var] = list(df[var].cat.categories)
         else:
             var_dict[var] = sorted(df[var].unique())
-            
+
     context = load_context(dataset)
 
     return df, var_dict, var_names, var_ord, sfm, context

@@ -29,8 +29,8 @@ same_model = (ann_model_name == model_name)
 
 datasets = [
     "nsduh",
-    "brfss",
-    "census_income",
+    # "brfss",
+    # "census_income",
 ]
 
 # ── preload all dataset info ────────────────────────────────────────────────
@@ -147,10 +147,11 @@ for dataset in datasets:
             df_sub = df[vars] if group_name != "" else None
             texts  = generated[(dataset, group_name)]
             var_dict_sub = {k: v for k, v in var_dict.items() if k not in vars}
+            var_names_sub = {k: v for k, v in var_names.items() if k not in vars}
 
             df_ann = annotate_data(
                 ann_model, ann_tokenizer, ann_device,
-                texts, var_dict_sub, var_ord,
+                texts, var_dict_sub, var_names_sub,var_ord,
                 engine=engine,
                 cache_path=ann_cache,
             )
