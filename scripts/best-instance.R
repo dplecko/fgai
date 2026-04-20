@@ -30,8 +30,7 @@ find_surprises <- function(scores_dt, eff_all, k = 100) {
   
   ce_dt <- scores_dt[ce %in% c("de", "ie", "se")]
   ce_dt[, direction := ifelse(world > 0, "disadvantage", "advantage")]
-  ce_dt[dataset == "census_income", 
-        direction := ifelse(world > 0, "advantage", "disadvantage")]
+  ce_dt[, significant := as.integer(abs(value) > 2 * sd)]
   
   # Class 1: largest reversal
   c1 <- ce_dt[classification == "reverse"][order(-abs(score))][, head(.SD, k)]
@@ -54,7 +53,7 @@ find_surprises <- function(scores_dt, eff_all, k = 100) {
   c3 <- c3[order(-score)][, head(.SD, k)]
   c3[, class := "tv_hides_bias"]
   
-  cols <- c("class", "direction", "model", "dataset", "stage", "ce", "score")
+  cols <- c("class", "direction", "model", "dataset", "stage", "ce", "score", "significant")
   rbindlist(list(c1[, ..cols], c2[, ..cols], c3[, ..cols]))
 }
 
@@ -67,11 +66,19 @@ print(surprises)
 # Class 1
 print(surprises[class == "reversal" & direction == "advantage"], topn = 161)
 
+# solid pick
+scores_dt[model == "gemma3_27b" & dataset == "nsduh" & stage == "fy"]
+
 # Class 2
-print(surprises[class == "amplification"], topn = 161)
+print(surprises[class == "amplification" & significant == 1], topn = 161)
 
-scores_dt[model == "llama3_70b" & dataset == "nsduh" & stage == "fy"]
+# not a bad pick!
+scores_dt[model == "llama3_70b" & dataset == "brfss" & stage == "fy"]
 
+
+scores_dt[model == "llama3_8b" & dataset == "brfss" & stage == "fy"]
+
+# wholesale inversion; classic
 scores_dt[model == "qwen35_27b" & dataset == "brfss" & stage == "model"]
 
 # Class 3

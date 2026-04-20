@@ -20,10 +20,6 @@ score_eff <- function(eff, eps = 1e-6) {
   out[, direction := fifelse(abs(world) < eps, "none",
                              fifelse(world > 0, "disadvantage", "advantage"))]
   
-  out[dataset == "census_income", 
-      direction := fifelse(abs(world) < eps, "none",
-                           fifelse(world > 0, "advantage", "disadvantage"))]
-  
   out[, score := fifelse(direction == "none",
                          pmin(pmax(value / eps, -1), 1),
                          pmin(pmax((value - world) / abs(world), -1), 1))]
@@ -107,7 +103,7 @@ write_stereotype_latex <- function(scores_dt, file,
   }
   
   lines <- c(
-    "\\begin{table}[t]",
+    # "\\begin{table}[t]",
     "\\centering",
     f("\\begin{tabular}{<<tabular_spec>>}", .open = "<<", .close = ">>"),
     "\\toprule",
@@ -132,9 +128,9 @@ write_stereotype_latex <- function(scores_dt, file,
     lines, 
     "\\bottomrule", 
     "\\end{tabular}", 
-    f("\\caption{<<caption>>}", .open = "<<", .close = ">>"),
-    f("\\label{<<label>>}", .open = "<<", .close = ">>"),
-    "\\end{table}"
+    f("\\captionof{table}{<<caption>>}", .open = "<<", .close = ">>"),
+    f("\\label{<<label>>}", .open = "<<", .close = ">>")
+    # "\\end{table}"
   )
   writeLines(paste(lines, collapse = "\n"), file)
   message("Written: ", file)
@@ -149,14 +145,11 @@ write_stereotype_latex <- function(scores_dt, file,
 #'
 #' Requires \usepackage{booktabs, colortbl, xcolor}.
 write_world_latex <- function(eff, file,
-                              caption = "Real-world discrimination.",
+                              caption = "Real-world discrimination with confidence intervals.",
                               label = "tab:world") {
   
   dt <- unique(eff[stage == "world" & ce %in% c("de", "ie", "se"),
                    .(dataset, ce, value, sd)])
-  
-  # census_income: sign is flipped (positive value means advantage for X=x1)
-  dt[dataset == "census_income", value := -value]
   
   # rename datasets
   dt[, dataset := DATASET_NAMES[dataset]]
@@ -166,7 +159,7 @@ write_world_latex <- function(eff, file,
     col   <- if (v > 0) "blue" else "green"
     shade <- if (sig) 40 else 15
     sprintf("\\cellcolor{%s!%d}$%.1f \\%%\\pm %.1f$ \\%%",
-            col, shade, 100 * v, 100 * s)
+            col, shade, 100 * v, 100 * 1.96 * s)
   }
   
   wide <- dcast(dt, dataset ~ ce, value.var = c("value", "sd"))

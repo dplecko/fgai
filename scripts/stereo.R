@@ -21,31 +21,29 @@ scores_all <- score_eff(eff_all)
 
 # --- per-dataset tables (appendix) ------------------------------------------
 
-for (ds in datasets) {
-  write_stereotype_latex(
-    scores_all[dataset == ds],
-    f("results/stereotype-table-{ds}.tex"),
-    caption = f("Stereotype analysis: {ds}."),
-    label = f("tab:stereotype-{ds}")
-  )
-}
+# for (ds in datasets) {
+#   write_stereotype_latex(
+#     scores_all[dataset == ds],
+#     f("results/stereotype-table-{ds}.tex"),
+#     caption = f("Stereotype analysis: {ds}."),
+#     label = f("tab:stereotype-{ds}")
+#   )
+# }
 
 # --- aggregate table (main text) --------------------------------------------
 
 write_stereotype_latex(
   copy(scores_all),
-  "results/stereotype-table-all.tex",
+  "results/stereo.tex",
   caption = "Stereotype analysis summary (all datasets).",
   label = "tab:stereotype-all"
 )
-
-fwrite(scores_all, "results/scores-all.csv")
 
 # --- real-world discrimination table ----------------------------------------
 
 write_world_latex(
   eff_all,
-  "results/world-table.tex",
-  caption = "Real-world discrimination across datasets (\\%).",
+  "results/world.tex",
+  caption = "Real-world discrimination across datasets with 95\\% confidence intervals.",
   label = "tab:world"
 )

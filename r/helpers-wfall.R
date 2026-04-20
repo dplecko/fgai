@@ -1,18 +1,14 @@
 # --- TV decomposition bar chart ----------------------------------------------
 
 #' @param eff output of extract_stage_effects (12 rows, sign-flipped)
-plot_one <- function(eff) {
+tv_plot <- function(eff) {
   
   world <- eff[stage == "world"]
   model <- eff[stage == "model"]
   
   # TV = sum of sign-flipped effects
   dt <- rbind(
-    data.table(ce = "tv", value = sum(world$value),
-               sd = sqrt(sum(world$sd^2)), env = "World"),
     world[, .(ce, value, sd, env = "World")],
-    data.table(ce = "tv", value = sum(model$value),
-               sd = sqrt(sum(model$sd^2)), env = "Model"),
     model[, .(ce, value, sd, env = "Model")]
   )
   
@@ -21,25 +17,21 @@ plot_one <- function(eff) {
   dt[, Environment := factor(env, levels = c("World", "Model"))]
   
   pd <- position_dodge(width = 0.9)
-  
-  ggplot(dt, aes(x = Measure, y = value, fill = Measure,
-                 pattern = Environment, group = Environment)) +
-    geom_col_pattern(
-      position = pd,
-      colour = "black",
-      linewidth = 1,
-      pattern_fill = "black",
-      pattern_density = 0.2,
-      pattern_spacing = 0.05
-    ) +
+
+  ggplot(dt, aes(x = Measure, y = value, fill = Environment,
+                 group = Environment)) +
+    geom_col(position = pd) +
     geom_errorbar(
       aes(ymin = value - 1.96 * sd,
           ymax = value + 1.96 * sd),
       position = pd,
       width = 0.25
     ) +
-    theme_bw() + scale_y_continuous(labels = scales::percent) +
-    theme(legend.position = "inside", legend.position.inside = c(0.65, 0.85),
+    theme_bw(base_size = 12) + scale_y_continuous(labels = scales::percent) +
+    scale_fill_manual(
+      values = c("World" = "#003f5c", "Model" = "#ffa600")
+    ) + ylab("Value") +
+    theme(legend.position = "inside", legend.position.inside = c(0.65, 0.15),
           legend.direction = "horizontal", legend.box.background = element_rect())
 }
 
@@ -108,7 +100,11 @@ waterfall_plot <- function(comp, val, sd) {
       vjust = -0.4, hjust = 1.2
     ) +
     geom_hline(yintercept = 0, linewidth = 0.3) +
-    scale_x_continuous(breaks = seq_along(lev), labels = lev) +
+    scale_x_continuous(
+      breaks = seq_along(lev),
+      labels = parse(text = sapply(lev, function(x)
+        if (inherits(x, "expression")) as.character(x) else deparse(x)))
+    ) +
     scale_fill_manual(
       name   = NULL,
       limits = c("Environment", "World", "Model",
@@ -120,17 +116,17 @@ waterfall_plot <- function(comp, val, sd) {
       drop = FALSE,
       guide = guide_legend(
         override.aes = list(
-          list(alpha = 0, colour = NA),
-          list(), list(),
-          list(alpha = 0, colour = NA),
-          list(), list()
+          fill   = c(NA,        "#003f5c", "#ffa600", NA,          "#2e7d32", "#c62828"),
+          colour = c(NA,        "black",   "black",   NA,          "black",   "black"),
+          alpha  = c(0,         1,         1,         0,           1,         1)
         )
       )
     ) +
     coord_cartesian(clip = "off") +
     labs(x = NULL, y = "Effect Value") +
-    theme_bw() +
-    theme(legend.text = element_markdown())
+    theme_bw(base_size = 12) +
+    theme(legend.text = element_markdown(),
+          axis.text.x = element_text(size = 14))
 }
 
 # --- three waterfall plots (DE, IE, SE) --------------------------------------
@@ -139,7 +135,7 @@ waterfall_plot <- function(comp, val, sd) {
 plot_three <- function(eff) {
   
   stages_ord  <- c("world", "fy", "fw", "model")
-  mech_labels <- c("Delta f_Y", "Delta f_W", "Delta f_Z")
+  mech_labels <- c(TeX("$\\Delta f_Y$"), TeX("$\\Delta f_W$"), TeX("$\\Delta f_{X,Z}$"))
   
   plotlist <- list()
   for (effect in c("de", "ie", "se")) {

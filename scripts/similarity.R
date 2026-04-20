@@ -19,14 +19,14 @@ eff_all <- rbindlist(lapply(datasets, function(ds) {
 
 # --- per-dataset MDS (appendix) ---------------------------------------------
 
-for (ds in datasets) {
-  mat <- to_9d_matrix(eff_all[dataset == ds])
-  mds <- run_mds(dist_l1(mat))
-  mds[, model := MODEL_NAMES[model]]
-  ggsave(f("results/mds-{ds}.png"),
-         plot = plot_mds(mds, title = f("Model Similarity ({ds})")),
-         width = 7, height = 5)
-}
+# for (ds in datasets) {
+#   mat <- to_9d_matrix(eff_all[dataset == ds])
+#   mds <- run_mds(dist_l1(mat))
+#   mds[, model := MODEL_NAMES[model]]
+#   ggsave(f("results/mds-{ds}.png"),
+#          plot = plot_mds(mds, title = f("Model Similarity ({ds})")),
+#          width = 7, height = 5)
+# }
 
 # --- joint MDS: concatenate across datasets (main text) ---------------------
 
@@ -79,15 +79,3 @@ p_dendro <- ggdendrogram(hc, rotate = FALSE, theme_dendro = FALSE) +
 
 ggsave("results/dendrogram-all.png", plot = p_dendro,
        width = 7, height = 5)
-
-# # checking by family
-# ggplot(
-#   dcast(scores_dt[grepl("llama", model)], dataset + ce + stage ~ model, value.var = "value"),
-#   aes(x = llama3_8b, y = llama3_70b)
-# ) + geom_point() + theme_bw() + geom_abline(slope = 1, intercept = 0, color = "orange")
-# 
-# 
-# ggplot(
-#   dcast(scores_dt[grepl("deepseek", model)], dataset + ce + stage ~ model, value.var = "value"),
-#   aes(x = deepseek_7b, y = deepseek_r1)
-# ) + geom_point() + theme_bw() + geom_abline(slope = 1, intercept = 0, color = "orange")

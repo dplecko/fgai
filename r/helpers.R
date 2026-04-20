@@ -11,13 +11,20 @@
 
 #' Load the 4 environment datasets for a given model
 #' Returns a named list keyed by env suffixes: "", "XZ", "XZW", "XZWY"
-load_model_data <- function(dataset, model) {
+load_model_data <- function(dataset, model, minority = TRUE) {
   
   X_var <- load_sfm(dataset)$X
   if (is.element(dataset, c("brfss", "nsduh"))) {
     
-    X_keep <- c("Black", "White")
-    X_ref <- "Black"
+    if (minority) {
+      
+      X_keep <- c("Black", "Hispanic", "White")
+      X_ref <- c("Black", "Hispanic")
+    } else {
+      
+      X_keep <- c("Black", "White")
+      X_ref <- c("Black")
+    }
   } else if (grepl("census", dataset)) {
     
     X_keep <- c("female", "male")
@@ -31,12 +38,13 @@ load_model_data <- function(dataset, model) {
       fl <- paste0(paste0(c(dataset, model, x), collapse = "_"), ".parquet")
       df <- as.data.frame(read_parquet(file.path("data", fl)))
       df <- df[df[[X_var]] %in% X_keep, ]
-      df[[X_var]] <- as.integer(df[[X_var]] == X_ref)
+      
+      df[[X_var]] <- as.integer(df[[X_var]] %in% X_ref)
       
       if (dataset == "census_income") {
         
         df[["salary_group"]] <- factor(
-          ifelse(df[["salary_group"]] >= "50001–75000 $", "yes", "no"),
+          ifelse(df[["salary_group"]] >= "50001–75000 $", "no", "yes"),
           levels = c("no", "yes")
         )
       }
@@ -93,7 +101,7 @@ prepare_for_osd <- function(data, sfm) {
       data <- cbind(data, dummies)
     }
   }
-  
+  # browser()
   list(data = data, sfm = sfm)
 }
 
@@ -137,7 +145,7 @@ estimate_within <- function(df_lst, X, Z, W, Y,
     env_key <- STAGES[[stg_name]]$env
     if (env_key == "") env_key <- 1
     prep <- prepare_for_osd(df_lst[[env_key]], sfm)
-    
+
     with_seed(2026,
               dt <- one_step_debias(
                 prep$data, prep$sfm$X, prep$sfm$Z, prep$sfm$W, prep$sfm$Y,
