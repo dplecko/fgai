@@ -239,15 +239,19 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
             var_name = var_names.get(var, var)
             _, answer_mapping = prepare_answers(levels)
             letters = list(answer_mapping.keys())
-            letter_ids = [vllm_tokenizer.convert_tokens_to_ids(l) for l in letters]
+            letter_ids = [vllm_tokenizer.encode(l, add_special_tokens=False)[0] for l in letters]
+            id_to_letter = {tid: l for tid, l in zip(letter_ids, letters)}
 
             ann_prompts = [prep_ann_prompt(text, var_name, levels)[0] for text in texts]
             sp = SamplingParams(max_tokens=1, temperature=0, allowed_token_ids=letter_ids)
             outputs = model.generate(ann_prompts, sp)
 
             for i, output in enumerate(outputs):
-                letter = output.outputs[0].text.strip().upper()
-                pred_answer = answer_mapping.get(letter, levels[0])
+                # letter = output.outputs[0].text.strip().upper()
+                # pred_answer = answer_mapping.get(letter, levels[0])
+                tid = output.outputs[0].token_ids[0]
+                letter = id_to_letter.get(tid, "")
+                pred_answer = answer_mapping.get(letter, None)
                 df.loc[i, var] = pred_answer
 
                 if cache_path is not None:
