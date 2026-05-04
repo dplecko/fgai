@@ -132,7 +132,8 @@ def gen_data_batched(
             )
             for p in prompts
         ]
-        outputs = model.generate(prompt_token_ids=chat_prompts, sampling_params=sp)
+        vllm_inputs = [{"prompt_token_ids": p} for p in chat_prompts]
+        outputs = model.generate(vllm_inputs, sp)
         
         for output in outputs:
             raw = output.outputs[0].text.strip()
@@ -266,7 +267,8 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
                 for p in ann_prompts
             ]
             sp = SamplingParams(max_tokens=1, temperature=0, allowed_token_ids=letter_ids)
-            outputs = model.generate(prompt_token_ids=chat_ann_prompts, sampling_params=sp)
+            vllm_inputs = [{"prompt_token_ids": p} for p in chat_ann_prompts]
+            outputs = model.generate(vllm_inputs, sp)
 
             for i, output in enumerate(outputs):
                 # letter = output.outputs[0].text.strip().upper()
