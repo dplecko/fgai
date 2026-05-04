@@ -26,11 +26,12 @@ batch_num      = args.batch
 
 BATCH_SIZE = 8192
 same_model = (ann_model_name == model_name)
+ann_only = False
 
 datasets = [
     "nsduh",
-    # "brfss",
-    # "census_income",
+    "brfss",
+    "census_income",
 ]
 
 def main():
@@ -73,7 +74,8 @@ def main():
 
 
     print("=== Phase 1: Generation ===")
-    gen_model, gen_tokenizer, gen_device = _load_model(model_name)
+    if not ann_only:
+        gen_model, gen_tokenizer, gen_device = _load_model(model_name)
 
     generated = {}  # (dataset, group_name) -> texts
 
@@ -117,7 +119,7 @@ def main():
             generated[(dataset, group_name)] = texts
 
     # unload gen model before loading ann model (if they differ)
-    if not same_model:
+    if not same_model and not ann_only:
         print("\nUnloading generation model from VRAM...")
         _unload_model(gen_model)
         del gen_model
@@ -126,7 +128,8 @@ def main():
     # ── PHASE 2: annotation + save ──────────────────────────────────────────────
     print("\n=== Phase 2: Annotation ===")
 
-    if same_model:
+    # Phase 2 model load
+    if same_model and not ann_only:
         ann_model, ann_tokenizer, ann_device = gen_model, gen_tokenizer, gen_device
     else:
         ann_model, ann_tokenizer, ann_device = _load_model(ann_model_name)
@@ -152,7 +155,7 @@ def main():
 
                 df_ann = annotate_data(
                     ann_model, ann_tokenizer, ann_device,
-                    texts, var_dict_sub, var_names_sub,var_ord,
+                    texts, var_dict_sub, var_names_sub, var_ord,
                     engine=engine,
                     cache_path=ann_cache,
                 )
@@ -169,8 +172,9 @@ def main():
                 df_prev = pd.read_parquet(out_path)
                 df_new = pd.concat([df_prev, df_new], ignore_index=True)
 
-            df_new.to_parquet(out_path, index=False)
-            print(f"    Saved {out_path} ({len(df_new)} rows)")
+            if not ann_only:
+                df_new.to_parquet(out_path, index=False)
+                print(f"    Saved {out_path} ({len(df_new)} rows)")
 
 if __name__ == "__main__":
     main()

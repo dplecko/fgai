@@ -212,9 +212,10 @@ def prep_ann_prompt(text, var_name, levels):
 
     try:
         prompt = (
-            "Input: Based on the following text:\n\n"
+            "Input: Consider the following text:\n\n"
             + text
-            + "\n\ndetermine the person's {}. "
+            + "\n\nIf there are multiple narratives, focus only on the first one. "
+            + "Based on the text, determine the person's {}. "
             + "Begin your answer with the capital letter corresponding to your chosen option below, followed by a period.\n"
         ).format(var_name)
     except Exception as e:

@@ -198,10 +198,10 @@ def get_var_names(dataset):
             "race": "race",
             "edu": "education",
             "income": "income",
-            "alc_monthly": "alcohol last month use",
-            "cig_monthly": "cigarette last month use",
-            "mj_monthly": "marijuana last month use",
-            "coc_ever": "cocaine ever use",
+            "alc_monthly": "alcohol use last month",
+            "cig_monthly": "cigarette use last month",
+            "mj_monthly": "marijuana use last month",
+            "coc_ever": "cocaine use ever",
         }
     elif dataset == "brfss":
         return {
