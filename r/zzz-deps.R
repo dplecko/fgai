@@ -16,8 +16,8 @@ expit <- function(x) exp(x) / (1 + exp(x))
 
 sync_data <- function() {
   dataset <- "fgai"
-  remote <- "ault"
-  system(f("rsync -avz --update {remote}:{dataset}/data/ data/"))
+  # remote <- "ault"
+  # system(f("rsync -avz --update {remote}:{dataset}/data/ data/"))
   
   remote <- "clariden"
   system(f("rsync -avz --update {remote}:{dataset}/data/ data/"))

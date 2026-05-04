@@ -136,7 +136,7 @@ def main():
 
     for dataset in datasets:
         info = dataset_info[dataset]
-        df, var_dict, var_ord = info["df"], info["var_dict"], info["var_ord"]
+        df, var_dict, var_names, var_ord = info["df"], info["var_dict"], info["var_names"], info["var_ord"]
         var_groups = info["var_groups"]
         nsamp = len(df)
         print(f"\n  {dataset} (batch {batch_num})")

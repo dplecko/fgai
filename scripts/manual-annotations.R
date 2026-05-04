@@ -13,6 +13,9 @@ cat(dr1[3, ][["response"]])
 # looking at annotations manually
 dran <- read_parquet("data/cache/nsduh_ministral3_8b_ministral3_8b__ann.parquet")
 
+
+dran <- read_parquet("data/cache/nsduh_llama3_8b_llama3_8b__ann.parquet")
+
 cat(dran[2, ][["prompt"]])
 
 cat(dran[3, ][["response"]])

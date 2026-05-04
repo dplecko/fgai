@@ -19,6 +19,11 @@ MODEL_PATHS = {
 
 VLLM_OVERRIDES = {
     "llama3_70b": {"max_model_len": 8192},
+    "ministral3_8b": {
+        "tokenizer_mode": "mistral",
+        "config_format": "mistral",
+        "load_format": "mistral",
+    },
 }
 _PATH_TO_NAME = {v: k for k, v in MODEL_PATHS.items()}
 
