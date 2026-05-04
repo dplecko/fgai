@@ -127,12 +127,12 @@ def gen_data_batched(
         chat_prompts = [
             vllm_tok.apply_chat_template(
                 [{"role": "user", "content": p}],
-                tokenize=False,
+                tokenize=True,
                 add_generation_prompt=True,
             )
             for p in prompts
         ]
-        outputs = model.generate(chat_prompts, sp) # previously outputs = model.generate(prompts, sp)
+        outputs = model.generate(prompt_token_ids=chat_prompts, sampling_params=sp)
         
         for output in outputs:
             raw = output.outputs[0].text.strip()
@@ -257,8 +257,16 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
             id_to_letter = {tid: l for tid, l in zip(letter_ids, letters)}
 
             ann_prompts = [prep_ann_prompt(text, var_name, levels)[0] for text in texts]
+            chat_ann_prompts = [
+                vllm_tokenizer.apply_chat_template(
+                    [{"role": "user", "content": p}],
+                    tokenize=True,
+                    add_generation_prompt=True,
+                )
+                for p in ann_prompts
+            ]
             sp = SamplingParams(max_tokens=1, temperature=0, allowed_token_ids=letter_ids)
-            outputs = model.generate(ann_prompts, sp)
+            outputs = model.generate(prompt_token_ids=chat_ann_prompts, sampling_params=sp)
 
             for i, output in enumerate(outputs):
                 # letter = output.outputs[0].text.strip().upper()
