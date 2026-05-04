@@ -117,18 +117,30 @@ def gen_data_batched(
 
     if engine == "vllm":
         from vllm import SamplingParams
+        is_qwen = "qwen" in model.llm_engine.model_config.model.lower()
         sp = SamplingParams(
             temperature=temperature,
             top_p=top_p,
-            max_tokens=max_new_tokens,
+            max_tokens=2048 if is_qwen else max_new_tokens,
         )
-        outputs = model.generate(prompts, sp)
+        vllm_tok = model.get_tokenizer()
+        chat_prompts = [
+            vllm_tok.apply_chat_template(
+                [{"role": "user", "content": p}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for p in prompts
+        ]
+        outputs = model.generate(chat_prompts, sp) # previously outputs = model.generate(prompts, sp)
+        
         for output in outputs:
             raw = output.outputs[0].text.strip()
             story = re.sub(r"<[^>]+>|{[^}]+}", "", raw)
-            words = story.split()
-            if len(words) > 200:
-                story = " ".join(words[:200]).rstrip()
+            if not is_qwen:
+                words = story.split()
+                if len(words) > 200:
+                    story = " ".join(words[:200]).rstrip()
             out_texts.append(story)
 
     else:  # transformers
@@ -235,8 +247,9 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
     if engine == "vllm":
         from vllm import SamplingParams
         vllm_tokenizer = model.get_tokenizer()
-
+        
         for var, levels in tqdm(var_dict.items(), desc="Annotating data"):
+            
             var_name = var_names.get(var, var)
             _, answer_mapping = prepare_answers(levels)
             letters = list(answer_mapping.keys())

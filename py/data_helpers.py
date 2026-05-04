@@ -164,6 +164,7 @@ def load_data(dataset: str):
 
         # filter out age < 18, which includes levels 12-13 years, 14-15 years, and 16-17 years
         df = df[~df["age"].isin(["12–13 years", "14–15 years", "16–17 years"])].reset_index(drop=True)
+        df["age"] = df["age"].cat.remove_unused_categories()
 
     var_names = get_var_names(dataset)
     sfm = load_sfm(dataset)

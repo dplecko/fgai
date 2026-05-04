@@ -7,8 +7,8 @@ from py.generation import *
 from py.data_helpers import load_data
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model", type=str, default="llama3_8b")
-parser.add_argument("--ann_model", type=str, default=None,
+parser.add_argument("--model", type=str, default="phi4")
+parser.add_argument("--ann_model", type=str, default="llama3_70b",
                     help="Annotator model name (defaults to --model)")
 parser.add_argument("--engine", type=str, default="vllm",
                     choices=["vllm", "transformers"])
@@ -152,7 +152,7 @@ def main():
                 texts  = generated[(dataset, group_name)]
                 var_dict_sub = {k: v for k, v in var_dict.items() if k not in vars}
                 var_names_sub = {k: v for k, v in var_names.items() if k not in vars}
-
+                
                 df_ann = annotate_data(
                     ann_model, ann_tokenizer, ann_device,
                     texts, var_dict_sub, var_names_sub, var_ord,
