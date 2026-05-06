@@ -2,7 +2,7 @@
 root <- rprojroot::find_root(rprojroot::has_file(".gitignore"))
 invisible(lapply(list.files(file.path(root, "r"), full.names = TRUE), source))
 
-N_SAMPLES <- 144
+N_SAMPLES <- 140
 OUT <- "results/manual_labels.csv"
 dataset <- "nsduh"
 ann_mod <- "llama3_70b"
@@ -23,8 +23,16 @@ all_pool <- all_pool[sample(.N)]
 all_pool <- head(all_pool, N_SAMPLES)
 
 done <- if (file.exists(OUT)) fread(OUT) else
-  data.table(row_id = integer(), gen_model = character())
-todo <- all_pool[!paste(gen_model, row_id) %in% paste(done$gen_model, done$row_id)]
+  data.table(gen_model = character())
+
+# top up to N_PER_MODEL per generator
+counts <- done[, .N, by = gen_model]
+todo <- all_pool[, {
+  have <- counts[gen_model == .BY$gen_model, N]
+  have <- if (length(have)) have else 0
+  need <- max(0, N_PER_MODEL - have)
+  head(.SD, need)
+}, by = gen_model]
 
 cat("Labeling", nrow(todo), "samples (already done:", nrow(done), ")\n")
 
@@ -51,4 +59,8 @@ for (i in seq_len(nrow(todo))) {
 cat("\nDone. Saved to", OUT, "\n")
 
 hitl <- fread(OUT)
-mean(hitl$llm == hitl$human, na.rm = TRUE)
+with_seed(123, hitl <- hitl[, .SD[sample(.N, min(.N, 15))], by = gen_model])
+mean(hitl$human == "")
+mean(hitl[human != ""]$llm == hitl[human != ""]$human, na.rm = TRUE)
+
+
