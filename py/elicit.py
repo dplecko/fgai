@@ -7,7 +7,7 @@ from py.generation import *
 from py.data_helpers import load_data
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model", type=str, default="phi4")
+parser.add_argument("--model", type=str, default="ministral3_8b")
 parser.add_argument("--ann_model", type=str, default="llama3_70b",
                     help="Annotator model name (defaults to --model)")
 parser.add_argument("--engine", type=str, default="vllm",
@@ -117,6 +117,9 @@ def main():
                     pd.concat([prev_cache, pd.read_parquet(gen_cache)], ignore_index=True).to_parquet(gen_cache, index=False)
 
             generated[(dataset, group_name)] = texts
+            # breakpoint()
+            # lns = [len(s) for s in texts]
+            # lns.count(0)
 
     # unload gen model before loading ann model (if they differ)
     if not same_model and not ann_only:
