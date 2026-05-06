@@ -121,14 +121,16 @@ def gen_data_batched(
         sp = SamplingParams(
             temperature=temperature,
             top_p=top_p,
-            max_tokens=2048 if is_qwen else max_new_tokens,
+            max_tokens=max_new_tokens,
         )
         vllm_tok = model.get_tokenizer()
+        template_kwargs = {"enable_thinking": False} if is_qwen else {}
         chat_prompts = [
             vllm_tok.apply_chat_template(
                 [{"role": "user", "content": p}],
                 tokenize=True,
                 add_generation_prompt=True,
+                **template_kwargs,
             )
             for p in prompts
         ]

@@ -22,7 +22,7 @@ them to write stories based on with different conditioning sets (∅ → {X, Z} 
 
 ## Part 2: Causal Estimation (`r/`)
 
-The `R` side loads the partially-generated datasets for each (dataset, model) pair and
+The `R` side loads the (partially) generated datasets for each (dataset, model) pair and
 estimates the causal fairness measures using one-step debiasing.
 
 ### File Organization
