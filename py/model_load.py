@@ -15,6 +15,11 @@ MODEL_PATHS = {
     "gemma3_27b": "google/gemma-3-27b-it",
     "deepseek_r1": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
     "llama3_70b": "meta-llama/Llama-3.3-70B-Instruct",
+    # annotator-only models (annotator-robustness sensitivity analysis)
+    "qwen35_122b_a10b": "Qwen/Qwen3.5-122B-A10B",
+    "glm45_air": "zai-org/GLM-4.5-Air",
+    "command_rp_104b": "CohereForAI/c4ai-command-r-plus",
+    "qwen25_72b": "Qwen/Qwen2.5-72B-Instruct"
 }
 
 VLLM_OVERRIDES = {
@@ -24,6 +29,9 @@ VLLM_OVERRIDES = {
         "config_format": "mistral",
         "load_format": "mistral",
     },
+    # Qwen3.5 is a hybrid VL model; its LM has tokens the VL tokenizer/vocab
+    # doesn't, which trips vLLM's max_token_id check unless multimodal is disabled.
+    "qwen35_122b_a10b": {"language_model_only": True},
 }
 _PATH_TO_NAME = {v: k for k, v in MODEL_PATHS.items()}
 

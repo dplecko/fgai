@@ -250,9 +250,12 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
     if engine == "vllm":
         from vllm import SamplingParams
         vllm_tokenizer = model.get_tokenizer()
-        
+        model_id = model.llm_engine.model_config.model.lower()
+        is_reasoning = "qwen" in model_id or "glm" in model_id
+        template_kwargs = {"enable_thinking": False} if is_reasoning else {}
+
         for var, levels in tqdm(var_dict.items(), desc="Annotating data"):
-            
+
             var_name = var_names.get(var, var)
             _, answer_mapping = prepare_answers(levels)
             letters = list(answer_mapping.keys())
@@ -264,7 +267,9 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
                 vllm_tokenizer.apply_chat_template(
                     [{"role": "user", "content": p}],
                     tokenize=True,
+                    return_dict=False,  # add
                     add_generation_prompt=True,
+                    **template_kwargs,
                 )
                 for p in ann_prompts
             ]

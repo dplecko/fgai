@@ -74,8 +74,13 @@ def main():
 
 
     print("=== Phase 1: Generation ===")
-    if not ann_only:
-        gen_model, gen_tokenizer, gen_device = _load_model(model_name)
+    gen_model = gen_tokenizer = gen_device = None
+
+    def _ensure_gen_model():
+        nonlocal gen_model, gen_tokenizer, gen_device
+        if gen_model is None and not ann_only:
+            gen_model, gen_tokenizer, gen_device = _load_model(model_name)
+        return gen_model, gen_tokenizer, gen_device
 
     generated = {}  # (dataset, group_name) -> texts
 
@@ -103,6 +108,7 @@ def main():
                     print(f"    [{group_name}] loaded {len(texts)} texts from cache, skipping generation")
 
             if texts is None:
+                gen_model, gen_tokenizer, gen_device = _ensure_gen_model()
                 # save previous batches before gen_data_batched overwrites the cache
                 prev_cache = pd.read_parquet(gen_cache) if os.path.exists(gen_cache) else None
                 texts = gen_data_batched(
@@ -122,7 +128,7 @@ def main():
             # lns.count(0)
 
     # unload gen model before loading ann model (if they differ)
-    if not same_model and not ann_only:
+    if not same_model and gen_model is not None:
         print("\nUnloading generation model from VRAM...")
         _unload_model(gen_model)
         del gen_model
@@ -133,7 +139,7 @@ def main():
 
     # Phase 2 model load
     if same_model and not ann_only:
-        ann_model, ann_tokenizer, ann_device = gen_model, gen_tokenizer, gen_device
+        ann_model, ann_tokenizer, ann_device = _ensure_gen_model()
     else:
         ann_model, ann_tokenizer, ann_device = _load_model(ann_model_name)
 
@@ -145,7 +151,12 @@ def main():
         print(f"\n  {dataset} (batch {batch_num})")
 
         for group_name, vars in var_groups.items():
-            out_path  = f"data/{dataset}_{model_name}_{group_name}.parquet"
+            # XZWY is ground truth (no generation/annotation), so it doesn't depend on ann_model
+            out_path = (
+                f"data/{dataset}_{model_name}_{group_name}.parquet"
+                if group_name == "XZWY"
+                else f"data/{dataset}_{model_name}_{ann_model_name}_{group_name}.parquet"
+            )
             ann_cache = f"data/cache/{dataset}_{model_name}_{ann_model_name}_{group_name}_ann.parquet"
 
             if group_name == "XZWY":
