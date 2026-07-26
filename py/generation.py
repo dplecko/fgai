@@ -32,15 +32,23 @@ def unknown_facts(uvar_dict):
 
 
 # make the variable list in prompt
-def varlist_to_prompt(var_dict, var_names, context=None):
+def varlist_to_prompt(var_dict, var_names, context=None, style="story"):
 
     ctx_line = f"CONTEXT: {context}\n" if context else ""
+    if style == "record":
+        rule1 = "Write the facts as a bulleted list, one bullet per fact.\n"
+        rule2 = "2) Do NOT include headings, narrative prose, analysis, or any text outside the list.\n"
+        prompt_end = "OUTPUT FORMAT:\n" "- (fact 1)\n" "- (fact 2)\n" "...\n"
+    else:
+        rule1 = "Write a single narrative enclosed in <story>...</story>.\n"
+        rule2 = "2) Do NOT include headings, lists, analysis, or any text outside the tags.\n"
+        prompt_end = "OUTPUT FORMAT:\n" "<story>\n" "(your narrative here)\n" "</story>\n"
     prompt_start = (
         "You are a data generator. Follow the rules strictly.\n"
         + ctx_line +
         "RULES:\n"
-        "1) Write a single narrative enclosed in <story>...</story>.\n"
-        "2) Do NOT include headings, lists, analysis, or any text outside the tags.\n"
+        f"1) {rule1}"
+        f"{rule2}"
         "3) Mention ALL facts given below exactly once ({}).\n"
         "4) Keep it under 200 words.\n\n"
     )
@@ -55,8 +63,6 @@ def varlist_to_prompt(var_dict, var_names, context=None):
 
     known = known_facts(known_vars) if len(known_vars) > 0 else ""
     unknown = unknown_facts(unknown_vars) if len(unknown_vars) > 0 else ""
-
-    prompt_end = "OUTPUT FORMAT:\n" "<story>\n" "(your narrative here)\n" "</story>\n"
 
     prompt = prompt_start + "\n" + known + "\n" + unknown + "\n\n" + prompt_end
     return prompt
@@ -98,6 +104,7 @@ def gen_data_batched(
     batch_size: int = 16,  # used by transformers engine only
     engine: str = "transformers",
     cache_path: str = None,
+    style: str = "story",
 ):
     # 0) build prompts
     if df is not None:
@@ -108,9 +115,9 @@ def gen_data_batched(
             dyn_dict = var_dict.copy()
             for var in known_vars:
                 dyn_dict[var] = [str(df.loc[i, var])]
-            prompts.append(varlist_to_prompt(dyn_dict, var_names, context=context))
+            prompts.append(varlist_to_prompt(dyn_dict, var_names, context=context, style=style))
     else:
-        prompt = varlist_to_prompt(var_dict, var_names, context=context)
+        prompt = varlist_to_prompt(var_dict, var_names, context=context, style=style)
         prompts = [prompt for _ in range(nsamp)]
 
     out_texts = []
@@ -129,6 +136,7 @@ def gen_data_batched(
             vllm_tok.apply_chat_template(
                 [{"role": "user", "content": p}],
                 tokenize=True,
+                return_dict=False,  # add
                 add_generation_prompt=True,
                 **template_kwargs,
             )

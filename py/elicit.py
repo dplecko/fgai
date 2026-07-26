@@ -15,6 +15,10 @@ parser.add_argument("--engine", type=str, default="vllm",
 parser.add_argument(
     "--batch", type=int, default=1, help="1 = rows 0:8192, 2 = rows 8192:16384"
 )
+parser.add_argument("--style", type=str, default="story", choices=["story", "record"],
+                    help="Generation prompt style: narrative (story) or bulleted list (record)")
+parser.add_argument("--temperature", type=float, default=1.0)
+parser.add_argument("--top_p", type=float, default=1.0)
 args = parser.parse_args()
 
 # --- settable directly for interactive use ---
@@ -22,16 +26,22 @@ model_name     = args.model           # e.g. model_name = "llama3_8b"
 ann_model_name = args.ann_model or model_name  # e.g. ann_model_name = "llama3_8b"
 engine         = args.engine          # e.g. engine = "vllm"
 batch_num      = args.batch
+style          = args.style
+temperature    = args.temperature
+top_p          = args.top_p
 # --------------------------------------------
 
 BATCH_SIZE = 8192
 same_model = (ann_model_name == model_name)
 ann_only = False
+# non-default generation settings get a filename tag; defaults stay untagged (backward compatible)
+gen_suffix = ("" if style == "story" else f"_{style}") + \
+             ("" if temperature == 1.0 and top_p == 1.0 else f"_t{temperature}_p{top_p}")
 
 datasets = [
-    "nsduh",
+    # "nsduh",
     "brfss",
-    "census_income",
+    # "census_income",
 ]
 
 def main():
@@ -96,7 +106,7 @@ def main():
                 continue  # no generation needed
 
             df_sub = df[vars] if group_name != "" else None
-            gen_cache = f"data/cache/{dataset}_{model_name}_{group_name}_gen.parquet"
+            gen_cache = f"data/cache/{dataset}_{model_name}_{group_name}{gen_suffix}_gen.parquet"
 
             # skip generation if this batch's texts are already cached
             texts = None
@@ -117,6 +127,9 @@ def main():
                     batch_size=model_batchsize(model_name) if engine == "transformers" else 1,
                     engine=engine,
                     cache_path=gen_cache,
+                    temperature=temperature,
+                    top_p=top_p,
+                    style=style,
                 )
                 # accumulate cache across batches
                 if prev_cache is not None:
@@ -155,9 +168,9 @@ def main():
             out_path = (
                 f"data/{dataset}_{model_name}_{group_name}.parquet"
                 if group_name == "XZWY"
-                else f"data/{dataset}_{model_name}_{ann_model_name}_{group_name}.parquet"
+                else f"data/{dataset}_{model_name}_{ann_model_name}_{group_name}{gen_suffix}.parquet"
             )
-            ann_cache = f"data/cache/{dataset}_{model_name}_{ann_model_name}_{group_name}_ann.parquet"
+            ann_cache = f"data/cache/{dataset}_{model_name}_{ann_model_name}_{group_name}{gen_suffix}_ann.parquet"
 
             if group_name == "XZWY":
                 df_new = enforce_levels(df[vars].copy(), var_dict, var_ord)

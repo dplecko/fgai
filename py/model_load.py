@@ -18,7 +18,7 @@ MODEL_PATHS = {
     # annotator-only models (annotator-robustness sensitivity analysis)
     "qwen35_122b_a10b": "Qwen/Qwen3.5-122B-A10B",
     "glm45_air": "zai-org/GLM-4.5-Air",
-    "command_rp_104b": "CohereForAI/c4ai-command-r-plus",
+    "commandrp_104b": "CohereLabs/c4ai-command-r-plus-08-2024",
     "qwen25_72b": "Qwen/Qwen2.5-72B-Instruct"
 }
 
