@@ -67,7 +67,7 @@ print(surprises)
 print(surprises[class == "reversal" & direction == "advantage"], topn = 161)
 
 # solid pick
-scores_dt[model == "gemma3_27b" & dataset == "nsduh" & stage == "fy"]
+scores_dt[model == "gemma3_27b" & dataset == "nsduh" & stage == "fw"]
 
 # Class 2
 print(surprises[class == "amplification" & significant == 1], topn = 161)
