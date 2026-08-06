@@ -206,18 +206,27 @@ def gen_data_batched(
 
 
 # helper functions
-def prepare_answers(levels):
+NA_LABEL = "Answer not available"
+
+
+def prepare_answers(levels, allow_na=True):
     """
     Prepare the answers for the model.
     :param levels: A list of possible answers.
-    :return: A list of tokenized answers.
+    :param allow_na: append an "Answer not available" option mapped to None.
+    :return: (answer_key text, mapping of letter -> value). The NA letter (if
+        present) maps to None, even though its displayed text is NA_LABEL.
     """
-    if len(levels) > 26:
+    display = list(levels) + ([NA_LABEL] if allow_na else [])
+    if len(display) > 26:
         raise ValueError("Supports up to 26 items (A-Z)")
 
     letters = string.ascii_uppercase  # 'A', 'B', ...
-    mapping = {letters[i]: item for i, item in enumerate(levels)}
-    answer_key = "\n".join(f"{k}. {v}" for k, v in mapping.items())
+    answer_key = "\n".join(f"{letters[i]}. {v}" for i, v in enumerate(display))
+
+    mapping = {letters[i]: item for i, item in enumerate(display)}
+    if allow_na:
+        mapping[letters[len(levels)]] = None
 
     return answer_key, mapping
 
@@ -249,10 +258,27 @@ def prep_ann_prompt(text, var_name, levels):
     return prompt, answer_mapping
 
 
-def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
+def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_names, var_ord,
                   engine: str = "transformers", cache_path: str = None):
+    """
+    Annotate stories against var_dict, retrying with later attempts when an
+    earlier story is missing information.
 
-    df = pd.DataFrame(columns=var_dict.keys())
+    :param texts_by_attempt: list of K parallel text lists (one list per
+        generation attempt, each of length nsamp, row-index-aligned). Attempt
+        1 is tried first for every row; a row only advances to attempt 2, 3, ...
+        if any variable came back "Answer not available" (NA) on the prior
+        attempt. Rows are never reordered or dropped.
+    :return: DataFrame with one column per var_dict variable plus an
+        "n_attempts" column (the 1-indexed attempt at which the row resolved,
+        or len(texts_by_attempt) if it never did).
+    """
+    n_rounds = len(texts_by_attempt)
+    nsamp = len(texts_by_attempt[0])
+    var_list = list(var_dict.keys())
+    df = pd.DataFrame(index=range(nsamp), columns=var_list)
+    n_attempts = pd.Series(0, index=range(nsamp), dtype=int)
+    remaining = pd.Index(range(nsamp))
     cache_records = []
 
     if engine == "vllm":
@@ -262,81 +288,104 @@ def annotate_data(model, tokenizer, device, texts, var_dict, var_names, var_ord,
         is_reasoning = "qwen" in model_id or "glm" in model_id
         template_kwargs = {"enable_thinking": False} if is_reasoning else {}
 
-        for var, levels in tqdm(var_dict.items(), desc="Annotating data"):
+        for attempt, texts in enumerate(texts_by_attempt, start=1):
+            if len(remaining) == 0:
+                break
+            print(f"    Annotating attempt {attempt}/{n_rounds} ({len(remaining)} rows)")
 
-            var_name = var_names.get(var, var)
-            _, answer_mapping = prepare_answers(levels)
-            letters = list(answer_mapping.keys())
-            letter_ids = [vllm_tokenizer.encode(l, add_special_tokens=False)[0] for l in letters]
-            id_to_letter = {tid: l for tid, l in zip(letter_ids, letters)}
+            for var, levels in tqdm(var_dict.items(), desc=f"Annotating (attempt {attempt})"):
 
-            ann_prompts = [prep_ann_prompt(text, var_name, levels)[0] for text in texts]
-            chat_ann_prompts = [
-                vllm_tokenizer.apply_chat_template(
-                    [{"role": "user", "content": p}],
-                    tokenize=True,
-                    return_dict=False,  # add
-                    add_generation_prompt=True,
-                    **template_kwargs,
-                )
-                for p in ann_prompts
-            ]
-            sp = SamplingParams(max_tokens=1, temperature=0, allowed_token_ids=letter_ids)
-            vllm_inputs = [{"prompt_token_ids": p} for p in chat_ann_prompts]
-            outputs = model.generate(vllm_inputs, sp)
+                var_name = var_names.get(var, var)
+                _, answer_mapping = prepare_answers(levels)
+                letters = list(answer_mapping.keys())
+                letter_ids = [vllm_tokenizer.encode(l, add_special_tokens=False)[0] for l in letters]
+                id_to_letter = {tid: l for tid, l in zip(letter_ids, letters)}
 
-            for i, output in enumerate(outputs):
-                # letter = output.outputs[0].text.strip().upper()
-                # pred_answer = answer_mapping.get(letter, levels[0])
-                tid = output.outputs[0].token_ids[0]
-                letter = id_to_letter.get(tid, "")
-                pred_answer = answer_mapping.get(letter, None)
-                df.loc[i, var] = pred_answer
+                sub_texts = [texts[pos] for pos in remaining]
+                ann_prompts = [prep_ann_prompt(text, var_name, levels)[0] for text in sub_texts]
+                chat_ann_prompts = [
+                    vllm_tokenizer.apply_chat_template(
+                        [{"role": "user", "content": p}],
+                        tokenize=True,
+                        return_dict=False,  # add
+                        add_generation_prompt=True,
+                        **template_kwargs,
+                    )
+                    for p in ann_prompts
+                ]
+                sp = SamplingParams(max_tokens=1, temperature=0, allowed_token_ids=letter_ids)
+                vllm_inputs = [{"prompt_token_ids": p} for p in chat_ann_prompts]
+                outputs = model.generate(vllm_inputs, sp)
 
-                if cache_path is not None:
-                    cache_records.append({
-                        "variable": var,
-                        "prompt": ann_prompts[i],
-                        "response": letter,
-                    })
+                for pos, output, prompt in zip(remaining, outputs, ann_prompts):
+                    tid = output.outputs[0].token_ids[0]
+                    letter = id_to_letter.get(tid, "")
+                    pred_answer = answer_mapping.get(letter, None)
+                    df.loc[pos, var] = pred_answer
 
-            df[var] = pd.Categorical(df[var], categories=levels, ordered=var_ord[var])
+                    if cache_path is not None:
+                        cache_records.append({
+                            "row": pos,
+                            "variable": var,
+                            "attempt": attempt,
+                            "prompt": prompt,
+                            "response": letter,
+                        })
+
+            n_attempts.loc[remaining] = attempt
+            still_invalid = df.loc[remaining, var_list].isna().any(axis=1)
+            remaining = still_invalid[still_invalid].index
 
     else:  # transformers
-        for var, levels in tqdm(var_dict.items(), desc="Annotating data"):
+        for attempt, texts in enumerate(texts_by_attempt, start=1):
+            if len(remaining) == 0:
+                break
+            print(f"    Annotating attempt {attempt}/{n_rounds} ({len(remaining)} rows)")
 
-            _, answer_mapping = prepare_answers(levels)
+            for var, levels in tqdm(var_dict.items(), desc=f"Annotating (attempt {attempt})"):
 
-            for i, text in enumerate(texts):
+                _, answer_mapping = prepare_answers(levels)
                 var_name = var_names.get(var, var)
-                ann_prompt, _ = prep_ann_prompt(text, var_name, levels)
-                inputs = tokenizer(ann_prompt, return_tensors="pt").to(device)
-                level_ids = [
-                    [tokenizer.convert_tokens_to_ids(tok) for tok in ans]
-                    for ans in answer_mapping.keys()
-                ]
 
-                with torch.no_grad():
-                    outputs = model(**inputs).logits
-                    next_token_logits = outputs[:, -1, :]
-                    probs = torch.softmax(next_token_logits, dim=-1)
+                for pos in remaining:
+                    text = texts[pos]
+                    ann_prompt, _ = prep_ann_prompt(text, var_name, levels)
+                    inputs = tokenizer(ann_prompt, return_tensors="pt").to(device)
+                    level_ids = [
+                        [tokenizer.convert_tokens_to_ids(tok) for tok in ans]
+                        for ans in answer_mapping.keys()
+                    ]
 
-                level_probs = [
-                    sum(probs[0, tid].item() for tid in ids) for ids in level_ids
-                ]
+                    with torch.no_grad():
+                        outputs = model(**inputs).logits
+                        next_token_logits = outputs[:, -1, :]
+                        probs = torch.softmax(next_token_logits, dim=-1)
 
-                pred_idx = max(range(len(level_probs)), key=level_probs.__getitem__)
-                pred_answer = answer_mapping[list(answer_mapping.keys())[pred_idx]]
-                df.loc[i, var] = pred_answer
+                    level_probs = [
+                        sum(probs[0, tid].item() for tid in ids) for ids in level_ids
+                    ]
 
-                if cache_path is not None:
-                    cache_records.append({
-                        "variable": var,
-                        "prompt": ann_prompt,
-                        "response": list(answer_mapping.keys())[pred_idx],
-                    })
+                    pred_idx = max(range(len(level_probs)), key=level_probs.__getitem__)
+                    pred_letter = list(answer_mapping.keys())[pred_idx]
+                    pred_answer = answer_mapping[pred_letter]
+                    df.loc[pos, var] = pred_answer
 
-            df[var] = pd.Categorical(df[var], categories=levels, ordered=var_ord[var])
+                    if cache_path is not None:
+                        cache_records.append({
+                            "row": pos,
+                            "variable": var,
+                            "attempt": attempt,
+                            "prompt": ann_prompt,
+                            "response": pred_letter,
+                        })
+
+            n_attempts.loc[remaining] = attempt
+            still_invalid = df.loc[remaining, var_list].isna().any(axis=1)
+            remaining = still_invalid[still_invalid].index
+
+    for var, levels in var_dict.items():
+        df[var] = pd.Categorical(df[var], categories=levels, ordered=var_ord[var])
+    df["n_attempts"] = n_attempts
 
     if cache_path is not None:
         _save_parquet(cache_records, cache_path)

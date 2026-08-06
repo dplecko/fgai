@@ -28,6 +28,12 @@ VLLM_OVERRIDES = {
         "tokenizer_mode": "mistral",
         "config_format": "mistral",
         "load_format": "mistral",
+        # vLLM 0.23.0 has a bug where its dummy-input Pixtral (vision) profiling at
+        # engine init crashes with `MistralCommonImageProcessor.fetch_images`
+        # missing, even for text-only usage (github.com/vllm-project/vllm, fixed
+        # upstream in 0.24.0). We never send images, so disable the multimodal
+        # budget entirely as a workaround.
+        "limit_mm_per_prompt": {"image": 0},
     },
     # Qwen3.5 is a hybrid VL model; its LM has tokens the VL tokenizer/vocab
     # doesn't, which trips vLLM's max_token_id check unless multimodal is disabled.

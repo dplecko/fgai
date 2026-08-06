@@ -19,7 +19,19 @@ parser.add_argument("--style", type=str, default="story", choices=["story", "rec
                     help="Generation prompt style: narrative (story) or bulleted list (record)")
 parser.add_argument("--temperature", type=float, default=1.0)
 parser.add_argument("--top_p", type=float, default=1.0)
+parser.add_argument("--n_attempts", type=int, default=4,
+                    help="Max story generation attempts per row (1 primary + backups) "
+                         "before giving up and leaving that row's variables as NA")
+parser.add_argument("--gen_only", action="store_true",
+                    help="Only run Phase 1 (generation); no annotator model is loaded "
+                         "and nothing is annotated or saved to data/")
+parser.add_argument("--ann_only", action="store_true",
+                    help="Only run Phase 2 (annotation), reusing cached generation "
+                         "output from a prior --gen_only run; errors if any attempt's "
+                         "cache is missing rather than generating on the fly")
 args = parser.parse_args()
+if args.gen_only and args.ann_only:
+    parser.error("--gen_only and --ann_only are mutually exclusive")
 
 # --- settable directly for interactive use ---
 model_name     = args.model           # e.g. model_name = "llama3_8b"
@@ -29,19 +41,21 @@ batch_num      = args.batch
 style          = args.style
 temperature    = args.temperature
 top_p          = args.top_p
+n_attempts_max = args.n_attempts
+gen_only       = args.gen_only
+ann_only       = args.ann_only
 # --------------------------------------------
 
 BATCH_SIZE = 8192
 same_model = (ann_model_name == model_name)
-ann_only = False
 # non-default generation settings get a filename tag; defaults stay untagged (backward compatible)
 gen_suffix = ("" if style == "story" else f"_{style}") + \
              ("" if temperature == 1.0 and top_p == 1.0 else f"_t{temperature}_p{top_p}")
 
 datasets = [
-    # "nsduh",
+    "nsduh",
     "brfss",
-    # "census_income",
+    "census_income",
 ]
 
 def main():
@@ -106,39 +120,55 @@ def main():
                 continue  # no generation needed
 
             df_sub = df[vars] if group_name != "" else None
-            gen_cache = f"data/cache/{dataset}_{model_name}_{group_name}{gen_suffix}_gen.parquet"
 
-            # skip generation if this batch's texts are already cached
-            texts = None
-            if os.path.exists(gen_cache):
-                cached = pd.read_parquet(gen_cache)
-                if len(cached) >= batch_num * BATCH_SIZE:
-                    start = (batch_num - 1) * BATCH_SIZE
-                    texts = cached["response"].iloc[start : start + BATCH_SIZE].tolist()
-                    print(f"    [{group_name}] loaded {len(texts)} texts from cache, skipping generation")
+            # attempt 1 keeps the original (untagged) cache filename so existing
+            # caches are reused as-is; attempts 2+ are new backup stories for
+            # rows whose earlier attempt(s) fail annotation, generated for every
+            # row up front so the gen cache stays independent of any annotator.
+            attempts_texts = []
+            for attempt in range(1, n_attempts_max + 1):
+                attempt_tag = "" if attempt == 1 else f"_attempt{attempt}"
+                gen_cache = f"data/cache/{dataset}_{model_name}_{group_name}{gen_suffix}{attempt_tag}_gen.parquet"
 
-            if texts is None:
-                gen_model, gen_tokenizer, gen_device = _ensure_gen_model()
-                # save previous batches before gen_data_batched overwrites the cache
-                prev_cache = pd.read_parquet(gen_cache) if os.path.exists(gen_cache) else None
-                texts = gen_data_batched(
-                    df_sub, var_dict, var_names, context, nsamp,
-                    gen_model, gen_tokenizer, gen_device,
-                    batch_size=model_batchsize(model_name) if engine == "transformers" else 1,
-                    engine=engine,
-                    cache_path=gen_cache,
-                    temperature=temperature,
-                    top_p=top_p,
-                    style=style,
-                )
-                # accumulate cache across batches
-                if prev_cache is not None:
-                    pd.concat([prev_cache, pd.read_parquet(gen_cache)], ignore_index=True).to_parquet(gen_cache, index=False)
+                # skip generation if this batch's texts are already cached
+                texts = None
+                if os.path.exists(gen_cache):
+                    cached = pd.read_parquet(gen_cache)
+                    if len(cached) >= batch_num * BATCH_SIZE:
+                        start = (batch_num - 1) * BATCH_SIZE
+                        texts = cached["response"].iloc[start : start + BATCH_SIZE].tolist()
+                        print(f"    [{group_name}] attempt {attempt}: loaded {len(texts)} texts from cache, skipping generation")
 
-            generated[(dataset, group_name)] = texts
-            # breakpoint()
-            # lns = [len(s) for s in texts]
-            # lns.count(0)
+                if texts is None:
+                    if ann_only:
+                        raise FileNotFoundError(
+                            f"--ann_only requires cached generation output, but none found "
+                            f"for {gen_cache} (batch {batch_num}). Run a --gen_only pass first."
+                        )
+                    gen_model, gen_tokenizer, gen_device = _ensure_gen_model()
+                    # save previous batches before gen_data_batched overwrites the cache
+                    prev_cache = pd.read_parquet(gen_cache) if os.path.exists(gen_cache) else None
+                    texts = gen_data_batched(
+                        df_sub, var_dict, var_names, context, nsamp,
+                        gen_model, gen_tokenizer, gen_device,
+                        batch_size=model_batchsize(model_name) if engine == "transformers" else 1,
+                        engine=engine,
+                        cache_path=gen_cache,
+                        temperature=temperature,
+                        top_p=top_p,
+                        style=style,
+                    )
+                    # accumulate cache across batches
+                    if prev_cache is not None:
+                        pd.concat([prev_cache, pd.read_parquet(gen_cache)], ignore_index=True).to_parquet(gen_cache, index=False)
+
+                attempts_texts.append(texts)
+
+            generated[(dataset, group_name)] = attempts_texts
+
+    if gen_only:
+        print("\n--gen_only set: skipping annotation and save.")
+        return
 
     # unload gen model before loading ann model (if they differ)
     if not same_model and gen_model is not None:
@@ -176,13 +206,13 @@ def main():
                 df_new = enforce_levels(df[vars].copy(), var_dict, var_ord)
             else:
                 df_sub = df[vars] if group_name != "" else None
-                texts  = generated[(dataset, group_name)]
+                attempts_texts = generated[(dataset, group_name)]
                 var_dict_sub = {k: v for k, v in var_dict.items() if k not in vars}
                 var_names_sub = {k: v for k, v in var_names.items() if k not in vars}
-                
+
                 df_ann = annotate_data(
                     ann_model, ann_tokenizer, ann_device,
-                    texts, var_dict_sub, var_names_sub, var_ord,
+                    attempts_texts, var_dict_sub, var_names_sub, var_ord,
                     engine=engine,
                     cache_path=ann_cache,
                 )
@@ -199,9 +229,8 @@ def main():
                 df_prev = pd.read_parquet(out_path)
                 df_new = pd.concat([df_prev, df_new], ignore_index=True)
 
-            if not ann_only:
-                df_new.to_parquet(out_path, index=False)
-                print(f"    Saved {out_path} ({len(df_new)} rows)")
+            df_new.to_parquet(out_path, index=False)
+            print(f"    Saved {out_path} ({len(df_new)} rows)")
 
 if __name__ == "__main__":
     main()
