@@ -9,34 +9,73 @@
 
 # --- data loading -----------------------------------------------------------
 
+#' Format a float the way Python's f"{x}" does for the one-decimal values
+#' used by --temperature/--top_p (e.g. 1 -> "1.0", 0.7 -> "0.7"). Not a
+#' general float formatter; only tuned to that value set.
+py_float <- function(x) {
+  if (x == round(x)) sprintf("%.1f", x) else as.character(x)
+}
+
+#' Filename suffix for non-default generation settings.
+#' Mirrors py/elicit.py's `gen_suffix` exactly:
+#'   gen_suffix = ("" if style == "story" else f"_{style}") +
+#'                ("" if temperature == 1.0 and top_p == 1.0 else f"_t{temperature}_p{top_p}")
+#' Empty for the defaults (story, T=1, p=1), so paths/cache keys for existing
+#' runs are unchanged.
+gen_suffix <- function(style = "story", temperature = 1.0, top_p = 1.0) {
+
+  s1 <- if (style == "story") "" else paste0("_", style)
+  s2 <- if (temperature == 1.0 && top_p == 1.0) "" else {
+    sprintf("_t%s_p%s", py_float(temperature), py_float(top_p))
+  }
+  paste0(s1, s2)
+}
+
+#' Build the data/ parquet path for one (dataset, model, env) file.
+#' XZWY is ground truth: no ann_model, no style/decoding suffix (see elicit.py).
+model_data_path <- function(dataset, model, env, ann_model = "llama3_70b",
+                            style = "story", temperature = 1.0, top_p = 1.0) {
+
+  if (env == "XZWY") {
+    fl <- paste0(paste0(c(dataset, model, env), collapse = "_"), ".parquet")
+  } else {
+    suffix <- gen_suffix(style, temperature, top_p)
+    fl <- paste0(paste0(c(dataset, model, ann_model, env), collapse = "_"), suffix, ".parquet")
+  }
+  file.path("data", fl)
+}
+
 #' Load the 4 environment datasets for a given model
 #' Returns a named list keyed by env suffixes: "", "XZ", "XZW", "XZWY"
-load_model_data <- function(dataset, model, minority = TRUE) {
-  
+load_model_data <- function(dataset, model, ann_model = "llama3_70b", minority = TRUE,
+                            style = "story", temperature = 1.0, top_p = 1.0) {
+
   X_var <- load_sfm(dataset)$X
   if (is.element(dataset, c("brfss", "nsduh"))) {
-    
+
     if (minority) {
-      
+
       X_keep <- c("Black", "Hispanic", "White")
       X_ref <- c("Black", "Hispanic")
     } else {
-      
+
       X_keep <- c("Black", "White")
       X_ref <- c("Black")
     }
   } else if (grepl("census", dataset)) {
-    
+
     X_keep <- c("female", "male")
     X_ref <- "female"
   }
-  
+
+  # "" is full generative model; XZWY is full reality;
   envs <- c("", "XZ", "XZW", "XZWY")
   df_lst <- lapply(
     envs,
     function(x) {
-      fl <- paste0(paste0(c(dataset, model, x), collapse = "_"), ".parquet")
-      df <- as.data.frame(read_parquet(file.path("data", fl)))
+      fl <- model_data_path(dataset, model, x, ann_model = ann_model,
+                            style = style, temperature = temperature, top_p = top_p)
+      df <- as.data.frame(read_parquet(fl))
       df <- df[df[[X_var]] %in% X_keep, ]
       
       df[[X_var]] <- as.integer(df[[X_var]] %in% X_ref)
@@ -119,29 +158,34 @@ STAGES <- list(
 #' CE values (DE, IE, SE) at each stage. IE and SE are sign-flipped
 #' so all effects share DE's directionality (positive = disadvantage for X=x1).
 #'
-#' Results cached to results/cache/{dataset}_{model}.rds
+#' Results cached to results/cache/{dataset}_{model}_{ann_model}{suffix}.rds,
+#' where suffix encodes non-default style/temperature/top_p (see gen_suffix());
+#' empty for the defaults, so existing cache files are unaffected.
 #'
 #' @return data.table with 12 rows: stage × ce, columns: stage, ce, value, sd
 estimate_within <- function(df_lst, X, Z, W, Y,
                             dataset = NULL, model = NULL,
+                            ann_model = "llama3_70b",
+                            style = "story", temperature = 1.0, top_p = 1.0,
                             eps_trim = 0.001, cache = TRUE) {
 
   # caching
   if (cache && !is.null(dataset) && !is.null(model)) {
     cache_dir <- "results/cache"
-    cache_file <- file.path(cache_dir, f("{dataset}_{model}.rds"))
+    suffix <- gen_suffix(style, temperature, top_p)
+    cache_file <- file.path(cache_dir, f("{dataset}_{model}_{ann_model}{suffix}.rds"))
     if (file.exists(cache_file)) {
       message("Loading cached: ", model)
       return(readRDS(cache_file))
     }
   }
-  
+
   sfm <- list(X = X, Z = Z, W = W, Y = Y)
   ces <- c("tv", "de", "ie", "se")
   rows <- list()
-  
+
   for (stg_name in names(STAGES)) {
-    
+
     env_key <- STAGES[[stg_name]]$env
     if (env_key == "") env_key <- 1
     prep <- prepare_for_osd(df_lst[[env_key]], sfm)
@@ -152,9 +196,9 @@ estimate_within <- function(df_lst, X, Z, W, Y,
                 eps_trim = eps_trim
               )
     )
-    
+
     for (ce in ces) {
-      
+
       osd_meas <- if (ce == "tv") "tv" else paste0("ctf", ce)
       row  <- dt[measure == osd_meas]
       flip <- if (ce %in% c("ie", "se")) -1 else 1
@@ -164,10 +208,10 @@ estimate_within <- function(df_lst, X, Z, W, Y,
       )
     }
   }
-  
+
   eff <- rbindlist(rows)
   eff[, `:=`(model = model, dataset = dataset)]
-  
+
   if (cache && !is.null(dataset) && !is.null(model)) {
     dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
     saveRDS(eff, cache_file)
