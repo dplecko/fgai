@@ -114,17 +114,40 @@ def build_disagreements():
     return pd.concat(pools, ignore_index=True)
 
 
-def build_gold_prompt(story, var_name, levels):
+GENERAL_RULES = (
+    "1. If there are multiple people or narratives, focus only on the first one.\n"
+    "2. If there is duplicate or contradictory information about the person, answer NA.\n"
+    "3. If the answer is not reasonably clear, answer NA rather than guessing."
+)
+
+# Dataset/variable-specific rules, appended to GENERAL_RULES when applicable.
+# Extend this dict as more quirks like this one turn up during review.
+SPECIAL_RULES = {
+    ("census_income", "race"): (
+        "4. Special rule for race: \"Hispanic\" is an ethnicity, not one of the race "
+        "categories listed below. \"Hispanic\" alone, with no other race stated -> NA. "
+        "\"Hispanic\" plus a stated race category -> use that race category. Two distinct "
+        "race categories stated (e.g. White and Black) -> \"mix\". A single race stated that "
+        "isn't one of the other listed categories (e.g. Middle Eastern, Moroccan) -> \"other\"."
+    ),
+}
+
+
+def build_gold_prompt(dataset, variable, story, var_name, levels):
     options = "\n".join(f"- {lvl}" for lvl in levels)
+    rules = GENERAL_RULES
+    special = SPECIAL_RULES.get((dataset, variable))
+    if special:
+        rules = rules + "\n" + special
+
     return (
         "Consider the following story:\n\n"
         f"{story}\n\n"
-        "If there are multiple narratives, focus only on the first one, and identify "
-        "who it is about (e.g. \"the narrator\", \"the man described in the first paragraph\").\n\n"
         f"Based on the story, determine the person's {var_name}.\n\n"
         f"Valid options:\n{options}\n\n"
-        "If the story does not state this fact, directly or by clear implication, "
-        "answer \"NA\" rather than guessing."
+        f"Rules:\n{rules}\n\n"
+        "Also identify who the answer refers to (e.g. \"the narrator\", \"the man described "
+        "in the first paragraph\")."
     )
 
 
@@ -192,7 +215,7 @@ def cmd_build(args):
             "category": r["category"],
             "story": story,
             "local_prompt": r["prompt_a"],
-            "claude_prompt": build_gold_prompt(story, var_name, levels),
+            "claude_prompt": build_gold_prompt(r["dataset"], r["variable"], story, var_name, levels),
             "schema": json.dumps(build_schema(levels)),
             "qwen_letter": r["response_a"],
             "qwen_answer": decode_letter(r["response_a"], levels),
