@@ -5,79 +5,84 @@ invisible(lapply(list.files(file.path(root, "r"), full.names = TRUE), source))
 # --- prompt-format sensitivity: narrative (story) vs. bulleted (record) ------
 # Same generator, seeds, causal graph, and estimation; only the prompt style
 # given to the generator changes. Annotator is qwen25_72b for both styles.
-ann_model <- "qwen25_72b"
+ann_model   <- "qwen25_72b"
+CE_LABEL    <- c(de = "Direct", ie = "Indirect", se = "Spurious")
+STAGE_LABEL <- c(fy = "f_Y", fw = "f_W", model = "f_XZ")
+STYLE_LABEL <- c(story = "Narrative", record = "Bulleted")
 
 case_studies <- list(
   list(dataset = "nsduh", model = "gemma3_27b", label = "NSDUH–Gemma 3 27B"),
   list(dataset = "brfss", model = "qwen35_27b", label = "BRFSS–Qwen 3.5 27B")
 )
 
-CE_LABEL    <- c(de = "Direct", ie = "Indirect", se = "Spurious")
-STAGE_LABEL <- c(fy = "$f_Y$", fw = "$f_W$", model = "$f_{X,Z}$")
-
 get_eff <- function(dataset, model, style) {
   sfm    <- load_sfm(dataset)
   df_lst <- load_model_data(dataset, model, ann_model = ann_model, style = style)
   estimate_within(df_lst, sfm$X, sfm$Z, sfm$W, sfm$Y,
-                  dataset = dataset, model = model, ann_model = ann_model,
-                  style = style)
+                  dataset = dataset, model = model, ann_model = ann_model, style = style)
 }
 
-#' 9-row (ce x stage) comparison of the narrative vs. record decompositions
-#' for one case study, world stage excluded (it's real data, style-invariant).
-build_comparison <- function(cs) {
-  eff_story  <- get_eff(cs$dataset, cs$model, "story")
-  eff_record <- get_eff(cs$dataset, cs$model, "record")
+# --- gather (case study x style) effects, long format -------------------------
+all_eff <- rbindlist(lapply(case_studies, function(cs) {
+  rbindlist(lapply(names(STYLE_LABEL), function(sty) {
+    eff <- get_eff(cs$dataset, cs$model, sty)
+    eff[stage %in% names(STAGE_LABEL) & ce %in% names(CE_LABEL),
+        .(study = cs$label, style = sty, ce, stage, value, sd)]
+  }))
+}))
 
-  vec <- function(eff) eff[stage != "world" & ce %in% names(CE_LABEL),
-                           .(ce, stage, value)]
+all_eff[, `:=`(
+  study  = factor(study, levels = sapply(case_studies, `[[`, "label")),
+  effect = factor(CE_LABEL[ce], levels = CE_LABEL),
+  stage  = factor(STAGE_LABEL[stage], levels = STAGE_LABEL)
+)]
 
-  cmp <- merge(vec(eff_story), vec(eff_record), by = c("ce", "stage"),
-              suffixes = c("_narr", "_rec"))
-  cmp[, abs_shift := abs(value_rec - value_narr)]
+# --- narrative vs. record, one row per (study, effect, stage) ----------------
+wide <- dcast(all_eff, study + effect + stage ~ style, value.var = c("value", "sd"))
+wide[, `:=`(
+  diff    = value_record - value_story,
+  se_diff = sqrt(sd_story^2 + sd_record^2)
+)]
+wide[, shift_sd := diff / se_diff]  # shift relative to combined estimation uncertainty
 
-  cmp[, ce    := factor(ce, levels = names(CE_LABEL))]
-  cmp[, stage := factor(stage, levels = names(STAGE_LABEL))]
-  setorder(cmp, ce, stage)
-  cmp
-}
+# --- scatter: narrative vs. record, per-study correlation ---------------------
+cor_dt <- wide[, .(label = sprintf("r = %.2f", cor(value_story, value_record))), by = study]
 
-write_prompt_sensitivity_md <- function(cmp, label, file, append = FALSE) {
-  lines <- c(
-    f("### {label}"),
-    "",
-    paste0("| Pathway | Mechanism Replacement | Narrative Prompt (%) | ",
-           "Bulleted Prompt (%) | Absolute Shift (%) |"),
-    "|---|---|---:|---:|---:|"
-  )
-  for (i in seq_len(nrow(cmp))) {
-    row <- cmp[i]
-    lines <- c(lines, sprintf(
-      "| %s | %s | %.1f | %.1f | %.1f |",
-      CE_LABEL[[as.character(row$ce)]], STAGE_LABEL[[as.character(row$stage)]],
-      100 * row$value_narr, 100 * row$value_rec, 100 * row$abs_shift
-    ))
-  }
-  lines <- c(lines, sprintf(
-    "| **Aggregate** |  |  |  | **Mean: %.1f%%** |", 100 * mean(cmp$abs_shift)
-  ), "")
+p_scatter <- ggplot(wide, aes(value_story, value_record, color = effect)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey60") +
+  geom_point(size = 2.5) +
+  geom_text(data = cor_dt, aes(x = -Inf, y = Inf, label = label),
+           inherit.aes = FALSE, hjust = -0.2, vjust = 1.5) +
+  facet_wrap(~ study) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Narrative prompt", y = "Bulleted prompt", color = "Effect") +
+  theme_bw()
 
-  con <- file(file, open = if (append) "a" else "w")
-  writeLines(lines, con)
-  close(con)
-  message("Written: ", label)
-}
+ggsave("results/prompt-sens-scatter.png", p_scatter, width = 9, height = 4.5)
 
-dir.create("results", showWarnings = FALSE, recursive = TRUE)
-out_file <- "results/prompt-sensitivity.md"
+# --- heatmap: |shift| in SD units, stage (x) x effect (y), facet by study ----
+# (SD units = shift relative to the pooled estimation SE, so a hot cell means
+# the narrative/record gap is large relative to how uncertain each estimate is)
+p_heat <- ggplot(wide, aes(stage, effect, fill = abs(shift_sd))) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.1f", abs(shift_sd)))) +
+  facet_wrap(~ study) +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  labs(x = "Stage", y = "Effect", fill = "|Shift| (SD units)") +
+  theme_bw() +
+  scale_x_discrete(labels = c(TeX("$f_Y$"), TeX("$f_W$"), TeX("$f_{X, Z}$"))) +
+  theme(axis.text.x = element_text(size = 13))
 
-comparisons <- list()
-for (i in seq_along(case_studies)) {
-  cs <- case_studies[[i]]
-  message(f("[{cs$label}] narrative vs. bulleted-record"))
-  cmp <- build_comparison(cs)
-  comparisons[[cs$label]] <- cmp
-  write_prompt_sensitivity_md(cmp, cs$label, out_file, append = (i > 1))
-}
+ggsave("results/prompt-sens-heat.png", p_heat, width = 9, height = 4)
 
-print(comparisons)
+# --- summary table: mean absolute shift + sign agreement, as in tempp --------
+summary_dt <- wide[, .(
+  `Mean Abs. Shift` = paste0(round(100 * mean(abs(diff)), 1), "%"),
+  `Sign Agreement`  = paste(sum(sign(value_story) == sign(value_record)), "/ 9")
+), by = .(Study = study)]
+
+writeLines(
+  knitr::kable(summary_dt, format = "latex", booktabs = TRUE),
+  "results/prompt-sensitivity.tex"
+)
