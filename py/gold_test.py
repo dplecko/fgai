@@ -2,9 +2,9 @@
 # disagreements (attempt 1, group ""), then label it with Claude Opus 5.
 #
 # Usage:
-#   python3 py/gold-test.py build                 # sample 300 disagreements, save gold_test_set.parquet
-#   python3 py/gold-test.py submit                 # submit the Claude Batches job
-#   python3 py/gold-test.py collect [--wait]        # poll / fetch results, save gold_test_labeled.parquet
+#   python3 py/gold_test.py build                 # sample 300 disagreements, save gold_test_set.parquet
+#   python py/gold_test.py submit                 # submit the Claude Batches job
+#   python3 py/gold_test.py collect [--wait]        # poll / fetch results, save gold_test_labeled.parquet
 #
 # `build` only needs pandas/pyarrow (matches R/scripts/annotator-agreement.R's
 # data reading approach). `submit`/`collect` additionally need the `anthropic`
@@ -13,12 +13,16 @@
 import argparse
 import json
 import os
+os.environ["ANTHROPIC_API_KEY"] = "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"
 import re
 import string
 import time
 
 import pandas as pd
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from py.data_helpers import load_data
 
 DATASETS = ["nsduh", "brfss", "census_income"]
@@ -256,19 +260,35 @@ def cmd_collect(args):
     labels = {}
     errors = []
     for result in client.messages.batches.results(batch_id):
-        if result.result.type == "succeeded":
-            text = next(b.text for b in result.result.message.content if b.type == "text")
-            parsed = json.loads(text)
-            labels[result.custom_id] = {
-                "claude_target_person": parsed.get("target_person"),
-                "claude_evidence": parsed.get("evidence"),
-                "claude_answer": parsed.get("answer"),
-            }
-        else:
+        if result.result.type != "succeeded":
             errors.append((result.custom_id, result.result.type))
+            continue
+
+        message = result.result.message
+        text = next((b.text for b in message.content if b.type == "text"), None)
+        if text is None:
+            errors.append((result.custom_id, f"no text block (stop_reason={message.stop_reason})"))
+            continue
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            # Most likely cause: max_tokens cut generation off mid-JSON (thinking
+            # is on by default on Opus 5 and shares the max_tokens budget with the
+            # response) -- stop_reason confirms it. Skip and report, don't crash
+            # the whole collection over one bad record.
+            errors.append((result.custom_id, f"invalid JSON (stop_reason={message.stop_reason})"))
+            continue
+
+        labels[result.custom_id] = {
+            "claude_target_person": parsed.get("target_person"),
+            "claude_evidence": parsed.get("evidence"),
+            "claude_answer": parsed.get("answer"),
+        }
 
     if errors:
-        print(f"  {len(errors)} requests did not succeed: {errors[:10]}")
+        print(f"  {len(errors)} requests could not be parsed:")
+        for custom_id, reason in errors:
+            print(f"    {custom_id}: {reason}")
 
     gold_df = pd.read_parquet(GOLD_SET_PATH)
     label_df = pd.DataFrame.from_dict(labels, orient="index").reset_index().rename(columns={"index": "gold_id"})
@@ -279,6 +299,7 @@ def cmd_collect(args):
     print(f"Saved {len(labeled)} labeled rows to {LABELED_PATH}")
 
 
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -287,7 +308,7 @@ def main():
 
     p_submit = sub.add_parser("submit")
     p_submit.add_argument("--model", type=str, default="claude-opus-5")
-    p_submit.add_argument("--max_tokens", type=int, default=1024)
+    p_submit.add_argument("--max_tokens", type=int, default=4096)
 
     p_collect = sub.add_parser("collect")
     p_collect.add_argument("--wait", action="store_true", help="poll until the batch ends")
@@ -304,3 +325,109 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# import pandas as pd
+
+# def review_disagreements(n, n_wrong, path="data/gold_test/gold_test_labeled.parquet", seed=None):
+#     """
+#     Print n gold-test rows where exactly n_wrong of {qwen, commandrp} disagree
+#     with Claude's answer, pausing after each. n_wrong must be 1 or 2.
+#     """
+#     assert n_wrong in (1, 2), "n_wrong must be 1 or 2"
+
+#     df = pd.read_parquet(path)
+#     df = df[df["claude_answer"].notna()].copy()
+
+#     df["wrong_count"] = (
+#         (df["qwen_answer"] != df["claude_answer"]).astype(int)
+#         + (df["commandrp_answer"] != df["claude_answer"]).astype(int)
+#     )
+
+#     pool = df[df["wrong_count"] == n_wrong]
+#     if pool.empty:
+#         print(f"No rows with exactly {n_wrong} model(s) disagreeing with Claude.")
+#         return
+
+#     sample = pool.sample(n=min(n, len(pool)), random_state=seed)
+
+#     for i, (_, r) in enumerate(sample.iterrows(), 1):
+#         print("=" * 70)
+#         print(f"[{i}/{len(sample)}] {r['dataset']} / {r['gen_model']} / row {r['row']} / {r['variable']} ({r['category']})")
+#         print("-" * 70)
+#         print(r["local_prompt"])
+#         print("-" * 70)
+#         print(f"qwen:       {r['qwen_answer']}")
+#         print(f"commandrp:  {r['commandrp_answer']}")
+#         print(f"claude:     {r['claude_answer']}   (target: {r['claude_target_person']})")
+#         print(f"  evidence: {r['claude_evidence']}")
+#         print("=" * 70)
+
+#         cmd = input("[c]ontinue, [q]uit: ").strip().lower()
+#         if cmd.startswith("q"):
+#             print("Stopped.")
+#             break
+
+# gt.loc[(gt["dataset"] == "census_income") & (gt["variable"] == "race")]
+# gt.loc[gt.index[158], "claude_target_person"] = "Michael, 35 year old White male"
+# gt.loc[gt.index[158], "claude_evidence"] = "He holds a Bachelor's degree"
+# gt.loc[gt.index[158], "claude_answer"] = "Bachelor's degree"
+# gt.loc[gt.index[55], "claude_answer"] = 'Bachelor’s or higher'
+
+# # gt.to_parquet("data/gold_test/gold_test_labeled.parquet")
+
+# def check_claude_answers(path=LABELED_PATH):
+#     """
+#     Verify every claude_answer is exactly one of the valid options (the
+#     variable's levels + 'NA') for its row. Flags exact mismatches, and
+#     separately flags case-only mismatches -- structured outputs' enum
+#     constraint should make these impossible, so a nonzero count here is
+#     worth reporting, not just silently normalizing away.
+#     """
+#     df = pd.read_parquet(path)
+#     mismatches = []
+#     for _, r in df.iterrows():
+#         if pd.isna(r["claude_answer"]):
+#             continue
+#         levels = dataset_info(r["dataset"])["var_dict"][r["variable"]]
+#         valid = list(levels) + ["NA"]
+#         if r["claude_answer"] in valid:
+#             continue
+
+#         lower_map = {v.lower(): v for v in valid}
+#         close = lower_map.get(str(r["claude_answer"]).lower())
+
+#         mismatches.append({
+#             "gold_id": r["gold_id"],
+#             "dataset": r["dataset"],
+#             "variable": r["variable"],
+#             "claude_answer": r["claude_answer"],
+#             "closest_valid_option": close,
+#             "valid_options": valid,
+#         })
+
+#     mismatch_df = pd.DataFrame(mismatches)
+#     if mismatch_df.empty:
+#         print("All claude_answer values match a valid option exactly.")
+#     else:
+#         n_case_only = mismatch_df["closest_valid_option"].notna().sum()
+#         print(f"{len(mismatch_df)} claude_answer values don't exactly match a valid option "
+#               f"({n_case_only} case-only, {len(mismatch_df) - n_case_only} with no close match at all).")
+#     return mismatch_df
+
+
+# cenra = gt.loc[(gt["dataset"] == "census_income") & (gt["variable"] == "race")]
+# for i, (_, r) in enumerate(cenra.iterrows(), 1):
+#         print("=" * 70)
+#         print(f"[{i}/{len(cenra)}] {r['dataset']} / {r['gen_model']} / row {r['row']} / {r['variable']} ({r['category']})")
+#         print("-" * 70)
+#         print(r["local_prompt"])
+#         print("-" * 70)
+#         print(f"qwen:       {r['qwen_answer']}")
+#         print(f"commandrp:  {r['commandrp_answer']}")
+#         print(f"claude:     {r['claude_answer']}   (target: {r['claude_target_person']})")
+#         print(f"  evidence: {r['claude_evidence']}")
+#         print("=" * 70)
+#         cmd = input("[c]ontinue, [q]uit: ").strip().lower()
+#         if cmd.startswith("q"):
+#             print("Stopped.")
+#             break
