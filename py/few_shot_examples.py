@@ -38,15 +38,15 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The passage describes Marcus as Black in one sentence, then a few "
-                    "lines later refers to him as Asian without explanation."
+                    "Marcus is a Black man who grew up in Detroit. After moving to "
+                    "Portland, Marcus, who is Asian, opened a neighborhood bookstore."
                 ),
                 "answer": "NA",
             },
             "unclear": {
                 "story": (
-                    "The story mentions that Wendy's family has roots going back "
-                    "generations in the region, without ever stating her race directly."
+                    "Wendy's family has roots going back generations in the region, and "
+                    "their old family photographs fill her living room."
                 ),
                 "answer": "NA",
             },
@@ -72,15 +72,15 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The passage first says Daniel is 30, but later in the same paragraph "
-                    "refers to him celebrating his 45th birthday."
+                    "Daniel is a 30-year-old man from Texas who works as a mechanic. "
+                    "Yesterday, Daniel celebrated his 45th birthday with his family."
                 ),
                 "answer": "NA",
             },
             "unclear": {
                 "story": (
-                    "The story mentions that Priya has been in the workforce for what feels "
-                    "like forever, without ever giving a specific age."
+                    "Priya says she has been in the workforce for what feels like forever. "
+                    "She now supervises the front desk at a busy hotel."
                 ),
                 "answer": "NA",
             },
@@ -104,15 +104,15 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The passage refers to Jordan as 'he' early on, then later describes "
-                    "Jordan using 'she' without explanation."
+                    "Jordan picked up his keys and drove to the office before sunrise. "
+                    "At lunch, Jordan said she planned to leave work early."
                 ),
                 "answer": "NA",
             },
             "unclear": {
                 "story": (
-                    "The story only refers to the person as 'the individual' throughout, "
-                    "without using any gendered language or pronouns."
+                    "The individual arrived before sunrise, unlocked the shop, and spent "
+                    "the morning arranging new stock."
                 ),
                 "answer": "NA",
             },
@@ -141,15 +141,15 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story states that Denise finished high school, but a few sentences "
-                    "later says she never made it past eighth grade."
+                    "Denise finished high school in 2012 and began working at a pharmacy. "
+                    "She left school after eighth grade and never returned to a classroom."
                 ),
                 "answer": "NA",
             },
             "unclear": {
                 "story": (
-                    "The passage mentions that Farah has 'been in and out of school over "
-                    "the years' without saying how far she got."
+                    "Farah has been in and out of school over the years. She hopes to "
+                    "continue her studies when her work schedule becomes less demanding."
                 ),
                 "answer": "NA",
             },
@@ -175,13 +175,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The passage says Lily earns around $30,000 a year, but later mentions "
-                    "her salary is closer to $60,000."
+                    "Lily earns around $30,000 a year at a small insurance office. Her "
+                    "annual salary of $60,000 lets her cover the rent comfortably."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The story mentions that Omar 'gets by okay' financially without ever stating a figure.",
+                "story": "Omar gets by okay financially and is careful about his spending each month.",
                 "answer": "NA",
             },
             "clear": {
@@ -205,15 +205,15 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story first says Tara hasn't used marijuana in the past month, "
-                    "but a later sentence describes her smoking with friends 'last week'."
+                    "Tara has not used marijuana at all in the past month. Last week, she "
+                    "smoked marijuana with friends at a party."
                 ),
                 "answer": "NA",
             },
             "unclear": {
                 "story": (
-                    "The passage vaguely mentions that Chris has 'been to a few parties "
-                    "lately' without saying anything about drug use."
+                    "Chris has been to a few parties lately and often stays out late "
+                    "talking with friends."
                 ),
                 "answer": "NA",
             },
@@ -239,13 +239,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The passage describes Hector as Hispanic in the opening line, but a "
-                    "few sentences later calls him Asian."
+                    "Hector is Hispanic and grew up in a close-knit family in Miami. "
+                    "Hector, who is Asian, later moved to Denver for a new job."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The story mentions that Wendy grew up 'all over the place' without ever describing her race.",
+                "story": "Wendy grew up all over the place and attended six different schools before college.",
                 "answer": "NA",
             },
             "clear": {
@@ -270,15 +270,15 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The passage says Frank is 40, but later refers to him celebrating his "
-                    "70th birthday."
+                    "Frank is 40 years old and owns a hardware store downtown. On Sunday, "
+                    "he celebrated his 70th birthday with the store's longtime customers."
                 ),
                 "answer": "NA",
             },
             "unclear": {
                 "story": (
-                    "The story mentions that Yusuf has 'been around long enough to "
-                    "remember when things were different,' without giving an actual age."
+                    "Yusuf says he has been around long enough to remember when things "
+                    "were different. He enjoys sharing old neighborhood stories."
                 ),
                 "answer": "NA",
             },
@@ -301,11 +301,14 @@ FEW_SHOT_EXAMPLES = {
                 "answer": "Male",
             },
             "contradiction": {
-                "story": "The story refers to Sam as 'he' at the start, then switches to 'she' later without explanation.",
+                "story": (
+                    "Sam put on his coat and walked to work. That afternoon, Sam said "
+                    "she would take the bus home."
+                ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage only ever refers to the subject as 'the patient,' with no pronouns or gendered details given.",
+                "story": "The patient checked in at noon, completed the paperwork, and waited quietly for the appointment.",
                 "answer": "NA",
             },
             "clear": {
@@ -327,11 +330,14 @@ FEW_SHOT_EXAMPLES = {
                 "answer": "college graduate",
             },
             "contradiction": {
-                "story": "The story says Doug graduated high school, but a later line describes him as never having finished.",
+                "story": (
+                    "Doug graduated from high school in 2008. He left high school before "
+                    "graduating so he could work full time."
+                ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that Aisha 'learned everything the hard way' without describing her schooling.",
+                "story": "Aisha says she learned everything the hard way while building a successful catering business.",
                 "answer": "NA",
             },
             "clear": {
@@ -355,13 +361,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story says Renee's household income is around $20,000 a year, but "
-                    "a later sentence puts it closer to $80,000."
+                    "Renee's household earns around $20,000 a year. With a household "
+                    "income of nearly $80,000, she recently began saving for a house."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that Leo 'does alright for himself' without stating an income.",
+                "story": "Leo does alright for himself and usually has enough left over for an occasional weekend trip.",
                 "answer": "NA",
             },
             "clear": {
@@ -384,13 +390,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story says Nadia hasn't exercised at all this month, but a few "
-                    "lines later mentions her regular gym routine."
+                    "Nadia has not exercised at all this month. She has kept up her "
+                    "regular three-times-a-week gym routine throughout the month."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that Oscar has 'been staying active lately' without giving any real detail.",
+                "story": "Oscar says he has been staying active lately and feels more energetic than he did before.",
                 "answer": "NA",
             },
             "clear": {
@@ -414,13 +420,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story describes Marco's BMI as normal early on, but later says "
-                    "his doctor flagged him as obese class 2."
+                    "Marco's latest physical placed his BMI in the normal range. During "
+                    "the follow-up visit, his doctor classified his BMI as obese class 2."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that Grace has 'put on a bit of weight recently' without giving any specifics.",
+                "story": "Grace says she has put on a bit of weight recently, though she has not weighed herself in months.",
                 "answer": "NA",
             },
             "clear": {
@@ -442,11 +448,11 @@ FEW_SHOT_EXAMPLES = {
                 "answer": "Yes",
             },
             "contradiction": {
-                "story": "The story says Felix does not have diabetes, but later mentions he takes insulin daily.",
+                "story": "Felix does not have diabetes. He takes insulin every day to manage his diabetes.",
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that Camille has 'been more careful about sugar lately' without saying why.",
+                "story": "Camille has been more careful about sugar lately and now skips dessert most evenings.",
                 "answer": "NA",
             },
             "clear": {
@@ -470,11 +476,14 @@ FEW_SHOT_EXAMPLES = {
                 "answer": "male",
             },
             "contradiction": {
-                "story": "The passage calls the subject 'he' in the first paragraph, then 'she' in the next without explanation.",
+                "story": (
+                    "Taylor updated his résumé before applying for the position. The next "
+                    "morning, Taylor said she had received an interview invitation."
+                ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The story refers to the person only as 'the employee' throughout, with no gendered details.",
+                "story": "The employee arrived early, prepared the conference room, and greeted each client at the door.",
                 "answer": "NA",
             },
             "clear": {
@@ -498,13 +507,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story says the subject is 33, but a later sentence mentions he's "
-                    "been working since he turned 50."
+                    "Martin is 33 years old and works at a shipping warehouse. Last month, "
+                    "Martin celebrated his 50th birthday with his coworkers."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions the person has 'been in the workforce a long time' without stating an age.",
+                "story": "Robin has been in the workforce a long time and knows the company's routines better than anyone.",
                 "answer": "NA",
             },
             "clear": {
@@ -527,13 +536,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story describes the subject as white in the opening line, but "
-                    "later refers to him as mixed race."
+                    "Ethan is white and works as an electrician in Baltimore. Ethan, who "
+                    "is mixed race, volunteers at a community workshop on Saturdays."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that the subject's family moved around a lot growing up, without describing race at all.",
+                "story": "Morgan's family moved around frequently, so Morgan grew up in several cities and attended many schools.",
                 "answer": "NA",
             },
             "clear": {
@@ -558,13 +567,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story places the subject's workplace in the Great Lakes region "
-                    "early on, then later refers to their office in the Southeast."
+                    "Casey works at the company's Great Lakes regional office in Detroit. "
+                    "Every weekday, Casey reports to the company's Southeast office in Atlanta."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that the subject 'travels a lot for work' without saying where their main office is.",
+                "story": "Riley travels frequently for work and spends most weeks visiting clients in different states.",
                 "answer": "NA",
             },
             "clear": {
@@ -596,13 +605,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story says the subject has a master's degree, but a later "
-                    "sentence mentions they never finished high school."
+                    "Jamie earned a master's degree in public administration. Jamie left "
+                    "school before finishing high school and never returned."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that the subject 'picked up a lot of skills on the job' without describing their formal education.",
+                "story": "Avery picked up many practical skills on the job and is now trusted to train new employees.",
                 "answer": "NA",
             },
             "clear": {
@@ -625,13 +634,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story says the subject works about 15 hours a week, but later "
-                    "mentions their full 45-hour work schedule."
+                    "Cameron works about 15 hours each week at a bookstore. Cameron's "
+                    "regular work schedule totals 45 hours every week."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that the subject 'keeps busy with work' without stating any hours.",
+                "story": "Quinn keeps busy with work and often has a long list of tasks waiting each morning.",
                 "answer": "NA",
             },
             "clear": {
@@ -654,13 +663,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story says the subject works for the government, but later "
-                    "describes them running their own self-employed consulting practice."
+                    "Jordan works for the state government as a policy analyst. Jordan is "
+                    "self-employed and runs an independent consulting practice full time."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that the subject 'has a good job downtown' without saying what kind of organization employs them.",
+                "story": "Bailey has a good job downtown and enjoys the short walk from the train station to the office.",
                 "answer": "NA",
             },
             "clear": {
@@ -686,13 +695,13 @@ FEW_SHOT_EXAMPLES = {
             },
             "contradiction": {
                 "story": (
-                    "The story says the subject earns around $60,000 a year, but later "
-                    "references a salary closer to $120,000."
+                    "Alex earns around $60,000 a year as an operations manager. Alex's "
+                    "annual salary of $120,000 covers the family's expenses comfortably."
                 ),
                 "answer": "NA",
             },
             "unclear": {
-                "story": "The passage mentions that the subject is 'financially comfortable' without giving a number.",
+                "story": "Reese is financially comfortable and can afford an occasional vacation without worrying about the cost.",
                 "answer": "NA",
             },
             "clear": {
