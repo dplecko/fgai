@@ -396,46 +396,55 @@ if __name__ == "__main__":
 # gt.loc[gt.index[158], "claude_answer"] = "Bachelor's degree"
 # gt.loc[gt.index[55], "claude_answer"] = 'Bachelor’s or higher'
 
+
+# gt = pd.read_parquet("data/gold_test/gold_test_labeled.parquet")
+# print(gt["local_prompt"][127])
+
+
+# gt.loc[gt.index[127], "claude_target_person"] = "David, 45 year-old from US"
+# gt.loc[gt.index[127], "claude_evidence"] = "He is an Asian White individual"
+# gt.loc[gt.index[127], "claude_answer"] = "Multiple"
+
 # # gt.to_parquet("data/gold_test/gold_test_labeled.parquet")
 
-# def check_claude_answers(path=LABELED_PATH):
-#     """
-#     Verify every claude_answer is exactly one of the valid options (the
-#     variable's levels + 'NA') for its row. Flags exact mismatches, and
-#     separately flags case-only mismatches -- structured outputs' enum
-#     constraint should make these impossible, so a nonzero count here is
-#     worth reporting, not just silently normalizing away.
-#     """
-#     df = pd.read_parquet(path)
-#     mismatches = []
-#     for _, r in df.iterrows():
-#         if pd.isna(r["claude_answer"]):
-#             continue
-#         levels = dataset_info(r["dataset"])["var_dict"][r["variable"]]
-#         valid = list(levels) + ["NA"]
-#         if r["claude_answer"] in valid:
-#             continue
+def check_claude_answers(path=LABELED_PATH):
+    """
+    Verify every claude_answer is exactly one of the valid options (the
+    variable's levels + 'NA') for its row. Flags exact mismatches, and
+    separately flags case-only mismatches -- structured outputs' enum
+    constraint should make these impossible, so a nonzero count here is
+    worth reporting, not just silently normalizing away.
+    """
+    df = pd.read_parquet(path)
+    mismatches = []
+    for _, r in df.iterrows():
+        if pd.isna(r["claude_answer"]):
+            continue
+        levels = dataset_info(r["dataset"])["var_dict"][r["variable"]]
+        valid = list(levels) + ["NA"]
+        if r["claude_answer"] in valid:
+            continue
 
-#         lower_map = {v.lower(): v for v in valid}
-#         close = lower_map.get(str(r["claude_answer"]).lower())
+        lower_map = {v.lower(): v for v in valid}
+        close = lower_map.get(str(r["claude_answer"]).lower())
 
-#         mismatches.append({
-#             "gold_id": r["gold_id"],
-#             "dataset": r["dataset"],
-#             "variable": r["variable"],
-#             "claude_answer": r["claude_answer"],
-#             "closest_valid_option": close,
-#             "valid_options": valid,
-#         })
+        mismatches.append({
+            "gold_id": r["gold_id"],
+            "dataset": r["dataset"],
+            "variable": r["variable"],
+            "claude_answer": r["claude_answer"],
+            "closest_valid_option": close,
+            "valid_options": valid,
+        })
 
-#     mismatch_df = pd.DataFrame(mismatches)
-#     if mismatch_df.empty:
-#         print("All claude_answer values match a valid option exactly.")
-#     else:
-#         n_case_only = mismatch_df["closest_valid_option"].notna().sum()
-#         print(f"{len(mismatch_df)} claude_answer values don't exactly match a valid option "
-#               f"({n_case_only} case-only, {len(mismatch_df) - n_case_only} with no close match at all).")
-#     return mismatch_df
+    mismatch_df = pd.DataFrame(mismatches)
+    if mismatch_df.empty:
+        print("All claude_answer values match a valid option exactly.")
+    else:
+        n_case_only = mismatch_df["closest_valid_option"].notna().sum()
+        print(f"{len(mismatch_df)} claude_answer values don't exactly match a valid option "
+              f"({n_case_only} case-only, {len(mismatch_df) - n_case_only} with no close match at all).")
+    return mismatch_df
 
 
 # cenra = gt.loc[(gt["dataset"] == "census_income") & (gt["variable"] == "race")]
