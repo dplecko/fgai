@@ -19,7 +19,8 @@ MODEL_PATHS = {
     "qwen35_122b_a10b": "Qwen/Qwen3.5-122B-A10B",
     "glm45_air": "zai-org/GLM-4.5-Air",
     "commandrp_104b": "CohereLabs/c4ai-command-r-plus-08-2024",
-    "qwen25_72b": "Qwen/Qwen2.5-72B-Instruct"
+    "qwen25_72b": "Qwen/Qwen2.5-72B-Instruct",
+    "mistral35_128b": "mistralai/Mistral-Medium-3.5-128B"
 }
 
 VLLM_OVERRIDES = {
@@ -34,6 +35,10 @@ VLLM_OVERRIDES = {
         # upstream in 0.24.0). We never send images, so disable the multimodal
         # budget entirely as a workaround.
         "limit_mm_per_prompt": {"image": 0},
+    },
+    "mistral35_128b": {
+        "max_model_len": 8192,
+        "language_model_only": True,
     },
     # Qwen3.5 is a hybrid VL model; its LM has tokens the VL tokenizer/vocab
     # doesn't, which trips vLLM's max_token_id check unless multimodal is disabled.

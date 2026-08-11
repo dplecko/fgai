@@ -127,13 +127,22 @@ def gen_data_batched(
     if engine == "vllm":
         from vllm import SamplingParams
         is_qwen = "qwen" in model.llm_engine.model_config.model.lower()
+        is_mistral = "mistral" in model.llm_engine.model_config.model.lower()
         sp = SamplingParams(
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_new_tokens,
         )
         vllm_tok = model.get_tokenizer()
-        template_kwargs = {"enable_thinking": False} if is_qwen else {}
+        
+        # fix this properly
+        if is_qwen:
+            template_kwargs = {"enable_thinking": False}
+        elif is_mistral:
+            template_kwargs = {"reasoning_effort": "none"}
+        else:
+            template_kwargs = {}
+
         chat_prompts = [
             vllm_tok.apply_chat_template(
                 [{"role": "user", "content": p}],
