@@ -349,46 +349,82 @@ def main():
 if __name__ == "__main__":
     main()
 
-# import pandas as pd
+def review_disagreements(n, benchmark_path, labeled_path=LABELED_PATH, seed=None):
+    """Interactively review model answers that disagree with Claude.
 
-# def review_disagreements(n, n_wrong, path="data/gold_test/gold_test_labeled.parquet", seed=None):
-#     """
-#     Print n gold-test rows where exactly n_wrong of {qwen, commandrp} disagree
-#     with Claude's answer, pausing after each. n_wrong must be 1 or 2.
-#     """
-#     assert n_wrong in (1, 2), "n_wrong must be 1 or 2"
+    ``benchmark_path`` is one CSV produced by ``goldtest_benchmark.py``. The
+    model answer comes from its ``predicted`` column; Claude's answer and the
+    story/review context always come from ``labeled_path``. Rows are matched by
+    ``gold_id``.
 
-#     df = pd.read_parquet(path)
-#     df = df[df["claude_answer"].notna()].copy()
+    Example:
+        review_disagreements(
+            20,
+            "data/gold_test/benchmark/qwen25_72b_fewshot.csv",
+            seed=1,
+        )
+    """
+    if n < 1:
+        raise ValueError("n must be at least 1")
 
-#     df["wrong_count"] = (
-#         (df["qwen_answer"] != df["claude_answer"]).astype(int)
-#         + (df["commandrp_answer"] != df["claude_answer"]).astype(int)
-#     )
+    required_benchmark_columns = {"gold_id", "predicted"}
+    benchmark = pd.read_csv(
+        benchmark_path,
+        usecols=lambda column: column in required_benchmark_columns,
+        dtype=str,
+        keep_default_na=False,
+    )
+    missing_columns = required_benchmark_columns - set(benchmark.columns)
+    if missing_columns:
+        missing = ", ".join(sorted(missing_columns))
+        raise ValueError(f"{benchmark_path} is missing required column(s): {missing}")
+    if benchmark["gold_id"].duplicated().any():
+        duplicates = benchmark.loc[benchmark["gold_id"].duplicated(), "gold_id"].tolist()
+        raise ValueError(f"Duplicate gold_id values in {benchmark_path}: {duplicates[:5]}")
 
-#     pool = df[df["wrong_count"] == n_wrong]
-#     if pool.empty:
-#         print(f"No rows with exactly {n_wrong} model(s) disagreeing with Claude.")
-#         return
+    gold = pd.read_parquet(labeled_path)
+    gold = gold[gold["claude_answer"].notna()].copy()
+    df = gold.merge(benchmark, on="gold_id", how="inner", validate="one_to_one")
 
-#     sample = pool.sample(n=min(n, len(pool)), random_state=seed)
+    missing_predictions = (df["predicted"] == "").sum()
+    if missing_predictions:
+        print(f"Skipping {missing_predictions} rows with an empty model prediction.")
+        df = df[df["predicted"] != ""].copy()
 
-#     for i, (_, r) in enumerate(sample.iterrows(), 1):
-#         print("=" * 70)
-#         print(f"[{i}/{len(sample)}] {r['dataset']} / {r['gen_model']} / row {r['row']} / {r['variable']} ({r['category']})")
-#         print("-" * 70)
-#         print(r["local_prompt"])
-#         print("-" * 70)
-#         print(f"qwen:       {r['qwen_answer']}")
-#         print(f"commandrp:  {r['commandrp_answer']}")
-#         print(f"claude:     {r['claude_answer']}   (target: {r['claude_target_person']})")
-#         print(f"  evidence: {r['claude_evidence']}")
-#         print("=" * 70)
+    pool = df[df["predicted"] != df["claude_answer"]]
+    if pool.empty:
+        print("No model answers disagree with Claude.")
+        return
 
-#         cmd = input("[c]ontinue, [q]uit: ").strip().lower()
-#         if cmd.startswith("q"):
-#             print("Stopped.")
-#             break
+    sample = pool.sample(n=min(n, len(pool)), random_state=seed)
+    model_name = os.path.splitext(os.path.basename(benchmark_path))[0]
+
+    for i, (_, r) in enumerate(sample.iterrows(), 1):
+        print("=" * 70)
+        print(
+            f"[{i}/{len(sample)}] {r['dataset']} / {r['gen_model']} / "
+            f"row {r['row']} / {r['variable']} ({r['category']})"
+        )
+        print(f"gold_id: {r['gold_id']}")
+        print("-" * 70)
+        print(r["local_prompt"])
+        print("-" * 70)
+        print(f"{model_name}: {r['predicted']}")
+        print(f"claude: {r['claude_answer']}   (target: {r['claude_target_person']})")
+        print(f"  evidence: {r['claude_evidence']}")
+        print("=" * 70)
+
+        cmd = input("[c]ontinue, [q]uit: ").strip().lower()
+        if cmd.startswith("q"):
+            print("Stopped.")
+            break
+
+
+review_disagreements(
+    20,
+    "data/gold_test/benchmark/llama3_70b_zeroshot.csv",
+    seed=1,
+)
 
 # gt.loc[(gt["dataset"] == "census_income") & (gt["variable"] == "race")]
 # gt.loc[gt.index[158], "claude_target_person"] = "Michael, 35 year old White male"
@@ -445,6 +481,7 @@ def check_claude_answers(path=LABELED_PATH):
         print(f"{len(mismatch_df)} claude_answer values don't exactly match a valid option "
               f"({n_case_only} case-only, {len(mismatch_df) - n_case_only} with no close match at all).")
     return mismatch_df
+
 
 
 # cenra = gt.loc[(gt["dataset"] == "census_income") & (gt["variable"] == "race")]
