@@ -71,22 +71,87 @@ def varlist_to_prompt(var_dict, var_names, context=None, style="story"):
 
 
 def extract_tag(text: str, tag: str = "story") -> str:
+    # Reasoning-capable models may emit a thinking block before the requested
+    # response. It is not part of the generated record.
+    text = re.sub(r"(?is)<think>.*?</think>", "", text).strip()
     m = re.search(rf"<{tag}>(.*?)</{tag}>", text, flags=re.DOTALL | re.IGNORECASE)
     if m:
         return m.group(1).strip()
-    # Fallback: if the model disobeys, strip known headings and return the first paragraph
+    # Fallback: if the model disobeys, remove only the requested wrapper and
+    # known headings. Do not strip arbitrary <...> text: records can contain
+    # comparisons such as "income < $10,000" and "age > 30".
+    text = re.sub(rf"(?i)</?{tag}\s*>", "", text)
     text = re.sub(r"(?is)^#+.*?$", "", text)  # markdown headers
     text = re.sub(r"(?is)^(analyzing errors|analysis).*?$", "", text).strip()
-    # take first non-empty paragraph
-    for para in re.split(r"\n\s*\n", text):
-        p = para.strip()
-        if p:
-            return p
     return text.strip()
 
 
+def _model_id(model=None, tokenizer=None) -> str:
+    """Best-effort model identifier for model-specific chat-template flags."""
+    if model is not None:
+        try:
+            return str(model.llm_engine.model_config.model).lower()
+        except AttributeError:
+            pass
+        try:
+            return str(model.config.name_or_path).lower()
+        except AttributeError:
+            pass
+    return str(getattr(tokenizer, "name_or_path", "")).lower()
+
+
+def _chat_template_kwargs(model_id: str) -> dict:
+    """Disable emitted reasoning because annotation deliberately returns one token."""
+    if "qwen" in model_id or "glm" in model_id:
+        return {"enable_thinking": False}
+    if "mistral" in model_id:
+        return {"reasoning_effort": "none"}
+    return {}
+
+
+def _apply_transformers_chat_template(tokenizer, prompts, template_kwargs=None):
+    """Render user prompts with the tokenizer's native chat template."""
+    template_kwargs = template_kwargs or {}
+    rendered = [
+        tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt}],
+            tokenize=False,
+            add_generation_prompt=True,
+            **template_kwargs,
+        )
+        for prompt in prompts
+    ]
+    # The rendered strings already contain all template special tokens.
+    return tokenizer(
+        rendered,
+        return_tensors="pt",
+        padding=True,
+        truncation=False,
+        add_special_tokens=False,
+    )
+
+
+def _single_token_answer_ids(tokenizer, letters):
+    """Return a validated one-token ID for every annotation answer letter."""
+    letter_to_id = {}
+    for letter in letters:
+        token_ids = tokenizer.encode(letter, add_special_tokens=False)
+        if len(token_ids) != 1:
+            raise ValueError(
+                f"Answer label {letter!r} must encode to exactly one token; got {token_ids}. "
+                "Choose different labels for this tokenizer."
+            )
+        letter_to_id[letter] = token_ids[0]
+
+    if len(set(letter_to_id.values())) != len(letter_to_id):
+        raise ValueError(f"Answer labels do not have unique token IDs: {letter_to_id}")
+    return letter_to_id
+
+
 def _save_parquet(records, path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     pd.DataFrame(records).to_parquet(path, index=False)
 
 
@@ -126,22 +191,14 @@ def gen_data_batched(
 
     if engine == "vllm":
         from vllm import SamplingParams
-        is_qwen = "qwen" in model.llm_engine.model_config.model.lower()
-        is_mistral = "mistral" in model.llm_engine.model_config.model.lower()
+        model_id = _model_id(model=model)
         sp = SamplingParams(
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_new_tokens,
         )
         vllm_tok = model.get_tokenizer()
-        
-        # fix this properly
-        if is_qwen:
-            template_kwargs = {"enable_thinking": False}
-        elif is_mistral:
-            template_kwargs = {"reasoning_effort": "none"}
-        else:
-            template_kwargs = {}
+        template_kwargs = _chat_template_kwargs(model_id)
 
         chat_prompts = [
             vllm_tok.apply_chat_template(
@@ -155,36 +212,34 @@ def gen_data_batched(
         ]
         vllm_inputs = [{"prompt_token_ids": p} for p in chat_prompts]
         outputs = model.generate(vllm_inputs, sp)
-        
+
         for output in outputs:
             raw = output.outputs[0].text.strip()
-            story = re.sub(r"<[^>]+>|{[^}]+}", "", raw)
-            if not is_qwen:
-                words = story.split()
-                if len(words) > 200:
-                    story = " ".join(words[:200]).rstrip()
+            story = extract_tag(raw)
+            words = story.split()
+            if len(words) > 200:
+                story = " ".join(words[:200]).rstrip()
             out_texts.append(story)
 
     else:  # transformers
+        model_id = _model_id(model=model, tokenizer=tokenizer)
+        template_kwargs = _chat_template_kwargs(model_id)
         for i in tqdm(range(0, len(prompts), batch_size), desc="Generating (batched)"):
             batch_prompts = prompts[i : i + batch_size]
 
-            enc = tokenizer(
+            enc = _apply_transformers_chat_template(
+                tokenizer,
                 batch_prompts,
-                return_tensors="pt",
-                padding=True,
-                truncation=False,
+                template_kwargs,
             )
             input_ids = enc["input_ids"].to(device)
             attention_mask = enc["attention_mask"].to(device)
-            input_lens = attention_mask.sum(dim=1)
+            prompt_width = input_ids.shape[1]
 
-            gen = model.generate(
+            generation_kwargs = dict(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                do_sample=True,
-                temperature=temperature,
-                top_p=top_p,
+                do_sample=temperature > 0,
                 num_return_sequences=1,
                 max_new_tokens=max_new_tokens,
                 eos_token_id=getattr(tokenizer, "eos_token_id", None),
@@ -195,12 +250,14 @@ def gen_data_batched(
                 ),
                 use_cache=True,
             )
+            if temperature > 0:
+                generation_kwargs.update(temperature=temperature, top_p=top_p)
+            gen = model.generate(**generation_kwargs)
 
             for j in range(gen.size(0)):
-                ilen = int(input_lens[j].item())
-                seq = gen[j, ilen:] if gen.size(1) > ilen else gen[j]
+                seq = gen[j, prompt_width:]
                 raw = tokenizer.decode(seq, skip_special_tokens=True).strip()
-                story = re.sub(r"<[^>]+>|{[^}]+}", "", raw)
+                story = extract_tag(raw)
                 words = story.split()
                 if len(words) > 200:
                     story = " ".join(words[:200]).rstrip()
@@ -273,13 +330,13 @@ def _render_few_shot_example(story, var_name, levels, answer, extra_rule=None):
         letter = string.ascii_uppercase[len(levels)]
     else:
         letter = next(l for l, v in answer_mapping.items() if v == answer)
-    return f"{prompt_text}{letter}.\n\n"
+    return f"{prompt_text}{letter}\n\n"
 
 
 def prep_ann_prompt(text, var_name, levels, few_shot_examples=None, extra_rule=None):
     """
     Prepare the prompt for the model.
-    :param prompt: The initial prompt.
+    :param text: The text to annotate.
     :param levels: A list of possible answers.
     :param few_shot_examples: optional entry from
         py/few_shot_examples.FEW_SHOT_EXAMPLES (with "var_name"/"levels"/
@@ -290,9 +347,6 @@ def prep_ann_prompt(text, var_name, levels, few_shot_examples=None, extra_rule=N
     :return: The prepared prompt.
     """
 
-    # clean from any appearance of "{" or "}" which may break format
-    text = re.sub(r"{|}", "", text)
-
     rules = ANNOTATION_RULES
     if extra_rule:
         rules = rules + extra_rule + "\n"
@@ -300,6 +354,11 @@ def prep_ann_prompt(text, var_name, levels, few_shot_examples=None, extra_rule=N
 
     prefix = ""
     if few_shot_examples:
+        if list(few_shot_examples["levels"]) != list(levels):
+            raise ValueError(
+                f"Few-shot levels for {var_name!r} do not match the runtime levels: "
+                f"{few_shot_examples['levels']} != {levels}"
+            )
         prefix = "".join(
             _render_few_shot_example(
                 ex["story"], few_shot_examples["var_name"], few_shot_examples["levels"], ex["answer"],
@@ -308,17 +367,15 @@ def prep_ann_prompt(text, var_name, levels, few_shot_examples=None, extra_rule=N
             for ex in few_shot_examples["examples"].values()
         )
 
-    try:
-        prompt = (
-            "Input: Consider the following text:\n\n"
-            + text
-            + "\n\n"
-            + rules
-            + "Based on the text, determine the person's {}. "
-            + "Begin your answer with the capital letter corresponding to your chosen option below, followed by a period.\n"
-        ).format(var_name)
-    except Exception as e:
-        breakpoint()
+    prompt = (
+        "Input: Consider the following text:\n\n"
+        + text
+        + "\n\n"
+        + rules
+        + f"Based on the text, determine the person's {var_name}. "
+        + "Return exactly the single capital letter corresponding to your chosen option below. "
+        + "Do not include a period, explanation, or any other text.\n"
+    )
     answers, answer_mapping = prepare_answers(levels)
     prompt += answers
     prompt += "\nOutput: "
@@ -346,8 +403,18 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
         "n_attempts" column (the 1-indexed attempt at which the row resolved,
         or len(texts_by_attempt) if it never did).
     """
+    if engine not in {"vllm", "transformers"}:
+        raise ValueError(f"Unknown engine: {engine!r}")
+    if not texts_by_attempt:
+        raise ValueError("texts_by_attempt must contain at least one attempt")
+
     n_rounds = len(texts_by_attempt)
     nsamp = len(texts_by_attempt[0])
+    for attempt, texts in enumerate(texts_by_attempt, start=1):
+        if len(texts) != nsamp:
+            raise ValueError(
+                f"Generation attempt {attempt} contains {len(texts)} rows; expected {nsamp}"
+            )
     var_list = list(var_dict.keys())
     df = pd.DataFrame(index=range(nsamp), columns=var_list)
     n_attempts = pd.Series(0, index=range(nsamp), dtype=int)
@@ -357,9 +424,8 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
     if engine == "vllm":
         from vllm import SamplingParams
         vllm_tokenizer = model.get_tokenizer()
-        model_id = model.llm_engine.model_config.model.lower()
-        is_reasoning = "qwen" in model_id or "glm" in model_id
-        template_kwargs = {"enable_thinking": False} if is_reasoning else {}
+        model_id = _model_id(model=model)
+        template_kwargs = _chat_template_kwargs(model_id)
 
         for attempt, texts in enumerate(texts_by_attempt, start=1):
             if len(remaining) == 0:
@@ -373,8 +439,9 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
                 extra_rule = SPECIAL_RULES.get((dataset, var))
                 _, answer_mapping = prepare_answers(levels)
                 letters = list(answer_mapping.keys())
-                letter_ids = [vllm_tokenizer.encode(l, add_special_tokens=False)[0] for l in letters]
-                id_to_letter = {tid: l for tid, l in zip(letter_ids, letters)}
+                letter_to_id = _single_token_answer_ids(vllm_tokenizer, letters)
+                letter_ids = list(letter_to_id.values())
+                id_to_letter = {tid: letter for letter, tid in letter_to_id.items()}
 
                 sub_texts = [texts[pos] for pos in remaining]
                 ann_prompts = [prep_ann_prompt(text, var_name, levels, fs_examples, extra_rule)[0] for text in sub_texts]
@@ -393,9 +460,14 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
                 outputs = model.generate(vllm_inputs, sp)
 
                 for pos, output, prompt in zip(remaining, outputs, ann_prompts):
+                    if not output.outputs[0].token_ids:
+                        raise RuntimeError("Annotator produced no token")
                     tid = output.outputs[0].token_ids[0]
-                    letter = id_to_letter.get(tid, "")
-                    pred_answer = answer_mapping.get(letter, None)
+                    try:
+                        letter = id_to_letter[tid]
+                    except KeyError as exc:
+                        raise RuntimeError(f"Annotator produced unexpected token ID {tid}") from exc
+                    pred_answer = answer_mapping[letter]
                     df.loc[pos, var] = pred_answer
 
                     if cache_path is not None:
@@ -412,6 +484,11 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
             remaining = still_invalid[still_invalid].index
 
     else:  # transformers
+        if tokenizer is None:
+            raise ValueError("tokenizer is required when engine='transformers'")
+        model_id = _model_id(model=model, tokenizer=tokenizer)
+        template_kwargs = _chat_template_kwargs(model_id)
+
         for attempt, texts in enumerate(texts_by_attempt, start=1):
             if len(remaining) == 0:
                 break
@@ -420,6 +497,7 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
             for var, levels in tqdm(var_dict.items(), desc=f"Annotating (attempt {attempt})"):
 
                 _, answer_mapping = prepare_answers(levels)
+                letter_to_id = _single_token_answer_ids(tokenizer, answer_mapping.keys())
                 var_name = var_names.get(var, var)
                 fs_examples = FEW_SHOT_EXAMPLES.get((dataset, var)) if few_shot else None
                 extra_rule = SPECIAL_RULES.get((dataset, var))
@@ -427,23 +505,21 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
                 for pos in remaining:
                     text = texts[pos]
                     ann_prompt, _ = prep_ann_prompt(text, var_name, levels, fs_examples, extra_rule)
-                    inputs = tokenizer(ann_prompt, return_tensors="pt").to(device)
-                    level_ids = [
-                        [tokenizer.convert_tokens_to_ids(tok) for tok in ans]
-                        for ans in answer_mapping.keys()
-                    ]
+                    inputs = _apply_transformers_chat_template(
+                        tokenizer,
+                        [ann_prompt],
+                        template_kwargs,
+                    ).to(device)
 
                     with torch.no_grad():
                         outputs = model(**inputs).logits
                         next_token_logits = outputs[:, -1, :]
-                        probs = torch.softmax(next_token_logits, dim=-1)
 
-                    level_probs = [
-                        sum(probs[0, tid].item() for tid in ids) for ids in level_ids
-                    ]
-
-                    pred_idx = max(range(len(level_probs)), key=level_probs.__getitem__)
-                    pred_letter = list(answer_mapping.keys())[pred_idx]
+                    letters = list(answer_mapping.keys())
+                    label_logits = torch.stack(
+                        [next_token_logits[0, letter_to_id[letter]] for letter in letters]
+                    )
+                    pred_letter = letters[int(torch.argmax(label_logits).item())]
                     pred_answer = answer_mapping[pred_letter]
                     df.loc[pos, var] = pred_answer
 
