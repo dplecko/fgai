@@ -5,6 +5,8 @@ import torch
 from tqdm import tqdm
 import pandas as pd
 
+from py.few_shot_examples import FEW_SHOT_EXAMPLES
+
 
 def known_facts(kvar_dict):
 
@@ -231,22 +233,78 @@ def prepare_answers(levels, allow_na=True):
     return answer_key, mapping
 
 
-def prep_ann_prompt(text, var_name, levels):
+ANNOTATION_RULES = (
+    "Rules:\n"
+    "1. If there are multiple people or narratives, focus only on the first one.\n"
+    "2. If there is duplicate or contradictory information about the person, answer NA.\n"
+    "3. If the answer is not reasonably clear, answer NA rather than guessing.\n"
+)
+
+# Dataset/variable-specific rules, appended to ANNOTATION_RULES when
+# applicable (looked up by annotate_data via (dataset, var), same key shape
+# as FEW_SHOT_EXAMPLES). Mirrors SPECIAL_RULES in gold-test.py's Claude
+# prompt, so the pipeline annotators and the Claude judge follow the same
+# rubric. Extend as more dataset/variable quirks like this one turn up.
+SPECIAL_RULES = {
+    ("census_income", "race"): (
+        "4. Special rule for race: \"Hispanic\" is an ethnicity, not one of the race "
+        "categories listed below. \"Hispanic\" alone, with no other race stated -> NA. "
+        "\"Hispanic\" plus a stated race category -> use that race category. Two distinct "
+        "race categories stated (e.g. White and Black) -> \"mix\". A single race stated that "
+        "isn't one of the other listed categories (e.g. Middle Eastern, Moroccan) -> \"other\"."
+    ),
+}
+
+
+def _render_few_shot_example(story, var_name, levels, answer, extra_rule=None):
+    """One demo Q&A block: same prep_ann_prompt format, completed with the
+    example's known-correct letter."""
+    prompt_text, answer_mapping = prep_ann_prompt(story, var_name, levels, extra_rule=extra_rule)
+    if answer == "NA":
+        letter = string.ascii_uppercase[len(levels)]
+    else:
+        letter = next(l for l, v in answer_mapping.items() if v == answer)
+    return f"{prompt_text}{letter}.\n\n"
+
+
+def prep_ann_prompt(text, var_name, levels, few_shot_examples=None, extra_rule=None):
     """
     Prepare the prompt for the model.
     :param prompt: The initial prompt.
     :param levels: A list of possible answers.
+    :param few_shot_examples: optional entry from
+        py/few_shot_examples.FEW_SHOT_EXAMPLES (with "var_name"/"levels"/
+        "examples" keys) -- rendered as demonstration Q&A blocks prepended
+        before the real query.
+    :param extra_rule: optional extra rule text (e.g. from SPECIAL_RULES),
+        appended after the general ANNOTATION_RULES.
     :return: The prepared prompt.
     """
 
     # clean from any appearance of "{" or "}" which may break format
     text = re.sub(r"{|}", "", text)
 
+    rules = ANNOTATION_RULES
+    if extra_rule:
+        rules = rules + extra_rule + "\n"
+    rules = rules + "\n"
+
+    prefix = ""
+    if few_shot_examples:
+        prefix = "".join(
+            _render_few_shot_example(
+                ex["story"], few_shot_examples["var_name"], few_shot_examples["levels"], ex["answer"],
+                extra_rule=extra_rule,
+            )
+            for ex in few_shot_examples["examples"].values()
+        )
+
     try:
         prompt = (
             "Input: Consider the following text:\n\n"
             + text
-            + "\n\nIf there are multiple narratives, focus only on the first one. "
+            + "\n\n"
+            + rules
             + "Based on the text, determine the person's {}. "
             + "Begin your answer with the capital letter corresponding to your chosen option below, followed by a period.\n"
         ).format(var_name)
@@ -255,11 +313,12 @@ def prep_ann_prompt(text, var_name, levels):
     answers, answer_mapping = prepare_answers(levels)
     prompt += answers
     prompt += "\nOutput: "
-    return prompt, answer_mapping
+    return prefix + prompt, answer_mapping
 
 
 def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_names, var_ord,
-                  engine: str = "transformers", cache_path: str = None):
+                  engine: str = "transformers", cache_path: str = None,
+                  dataset: str = None, few_shot: bool = False):
     """
     Annotate stories against var_dict, retrying with later attempts when an
     earlier story is missing information.
@@ -269,6 +328,11 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
         1 is tried first for every row; a row only advances to attempt 2, 3, ...
         if any variable came back "Answer not available" (NA) on the prior
         attempt. Rows are never reordered or dropped.
+    :param dataset: dataset name, used with each var to look up few-shot
+        demos in py/few_shot_examples.FEW_SHOT_EXAMPLES. Required if
+        few_shot=True.
+    :param few_shot: if True, prepend the hand-written demonstration examples
+        for (dataset, var) to each variable's annotation prompt, when present.
     :return: DataFrame with one column per var_dict variable plus an
         "n_attempts" column (the 1-indexed attempt at which the row resolved,
         or len(texts_by_attempt) if it never did).
@@ -296,13 +360,15 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
             for var, levels in tqdm(var_dict.items(), desc=f"Annotating (attempt {attempt})"):
 
                 var_name = var_names.get(var, var)
+                fs_examples = FEW_SHOT_EXAMPLES.get((dataset, var)) if few_shot else None
+                extra_rule = SPECIAL_RULES.get((dataset, var))
                 _, answer_mapping = prepare_answers(levels)
                 letters = list(answer_mapping.keys())
                 letter_ids = [vllm_tokenizer.encode(l, add_special_tokens=False)[0] for l in letters]
                 id_to_letter = {tid: l for tid, l in zip(letter_ids, letters)}
 
                 sub_texts = [texts[pos] for pos in remaining]
-                ann_prompts = [prep_ann_prompt(text, var_name, levels)[0] for text in sub_texts]
+                ann_prompts = [prep_ann_prompt(text, var_name, levels, fs_examples, extra_rule)[0] for text in sub_texts]
                 chat_ann_prompts = [
                     vllm_tokenizer.apply_chat_template(
                         [{"role": "user", "content": p}],
@@ -346,10 +412,12 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
 
                 _, answer_mapping = prepare_answers(levels)
                 var_name = var_names.get(var, var)
+                fs_examples = FEW_SHOT_EXAMPLES.get((dataset, var)) if few_shot else None
+                extra_rule = SPECIAL_RULES.get((dataset, var))
 
                 for pos in remaining:
                     text = texts[pos]
-                    ann_prompt, _ = prep_ann_prompt(text, var_name, levels)
+                    ann_prompt, _ = prep_ann_prompt(text, var_name, levels, fs_examples, extra_rule)
                     inputs = tokenizer(ann_prompt, return_tensors="pt").to(device)
                     level_ids = [
                         [tokenizer.convert_tokens_to_ids(tok) for tok in ans]

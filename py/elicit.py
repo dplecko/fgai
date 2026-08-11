@@ -29,6 +29,10 @@ parser.add_argument("--ann_only", action="store_true",
                     help="Only run Phase 2 (annotation), reusing cached generation "
                          "output from a prior --gen_only run; errors if any attempt's "
                          "cache is missing rather than generating on the fly")
+parser.add_argument("--few_shot", action="store_true",
+                    help="Prepend hand-written demonstration examples (py/few_shot_examples.py) "
+                         "to each variable's annotation prompt, when available for that "
+                         "(dataset, variable) pair")
 args = parser.parse_args()
 if args.gen_only and args.ann_only:
     parser.error("--gen_only and --ann_only are mutually exclusive")
@@ -44,6 +48,7 @@ top_p          = args.top_p
 n_attempts_max = args.n_attempts
 gen_only       = args.gen_only
 ann_only       = args.ann_only
+few_shot       = args.few_shot
 # --------------------------------------------
 
 BATCH_SIZE = 8192
@@ -215,6 +220,8 @@ def main():
                     attempts_texts, var_dict_sub, var_names_sub, var_ord,
                     engine=engine,
                     cache_path=ann_cache,
+                    dataset=dataset,
+                    few_shot=few_shot,
                 )
                 df_new = (
                     df_ann if group_name == ""
