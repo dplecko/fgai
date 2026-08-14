@@ -185,11 +185,14 @@ def main():
     # ── PHASE 2: annotation + save ──────────────────────────────────────────────
     print("\n=== Phase 2: Annotation ===")
 
-    # Phase 2 model load
-    if same_model and not ann_only:
-        ann_model, ann_tokenizer, ann_device = _ensure_gen_model()
+    # Phase 2 model load -- always vLLM: annotate_data dropped support for
+    # the transformers engine entirely (unused/inactive for a long time), so
+    # --engine now only affects Phase 1 generation. Only reuse the already-
+    # loaded gen model when it's actually a vLLM model.
+    if same_model and not ann_only and engine == "vllm":
+        ann_model, _gen_tok, _gen_dev = _ensure_gen_model()
     else:
-        ann_model, ann_tokenizer, ann_device = _load_model(ann_model_name)
+        ann_model = get_vllm_model(MODEL_PATHS[ann_model_name])
 
     for dataset in datasets:
         info = dataset_info[dataset]
@@ -216,9 +219,8 @@ def main():
                 var_names_sub = {k: v for k, v in var_names.items() if k not in vars}
 
                 df_ann = annotate_data(
-                    ann_model, ann_tokenizer, ann_device,
+                    ann_model,
                     attempts_texts, var_dict_sub, var_names_sub, var_ord,
-                    engine=engine,
                     cache_path=ann_cache,
                     dataset=dataset,
                     few_shot=few_shot,

@@ -52,10 +52,9 @@ def run_benchmark(model, ann_model, few_shot, cache_dir=None):
             cache_path = os.path.join(cache_dir, f"{ann_model}_{tag}_{dataset}_{variable}_ann.parquet")
 
         df_ann = annotate_data(
-            model, None, None,
+            model,
             [group["story"].tolist()],  # single attempt, no retries
             var_dict, var_names, var_ord,
-            engine="vllm",
             cache_path=cache_path,
             dataset=dataset,
             few_shot=few_shot,

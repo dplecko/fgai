@@ -6,6 +6,7 @@ from tqdm import tqdm
 import pandas as pd
 
 from py.few_shot_examples import FEW_SHOT_EXAMPLES
+from py.few_shot_helpers import render_demos_section, parse_json_answer
 
 
 def known_facts(kvar_dict):
@@ -244,9 +245,25 @@ def prepare_answers(levels, allow_na=True):
 
 ANNOTATION_RULES = (
     "Rules:\n"
-    "1. If there are multiple people or narratives, focus only on the first one.\n"
+    "1. If there are multiple people or narratives, focus only on the first one. "
+    "Even if the story mentions rewriting, redoing, or restarting itself partway "
+    "through, you should still focus only on the first person and their facts.\n"
     "2. If there is duplicate or contradictory information about the person, answer NA.\n"
     "3. If the answer is not reasonably clear, answer NA rather than guessing.\n"
+)
+
+# Unlike race/sex/age, education levels form a ladder rather than describing
+# a single point-in-time fact: a higher credential already implies the lower
+# ones, so two different levels mentioned for the same person aren't
+# automatically a contradiction the way they would be for e.g. race.
+_EDUCATION_SPECIAL_RULE = (
+    "4. Special rule for education: if more than one education level is mentioned for the "
+    "same person, don't treat that as a contradiction as long as neither statement "
+    "explicitly denies the other (e.g. neither says the person did not finish or dropped "
+    "out of a level the other claims they surpassed). Education levels build on each "
+    "other, so use the highest level mentioned. Only answer NA if one statement explicitly "
+    "contradicts what the other implies (e.g. \"dropped out before finishing high school\" "
+    "alongside \"has a bachelor's degree\")."
 )
 
 # Dataset/variable-specific rules, appended to ANNOTATION_RULES when
@@ -262,75 +279,74 @@ SPECIAL_RULES = {
         "race categories stated (e.g. White and Black) -> \"mix\". A single race stated that "
         "isn't one of the other listed categories (e.g. Middle Eastern, Moroccan) -> \"other\"."
     ),
+    ("nsduh", "edu"): _EDUCATION_SPECIAL_RULE,
+    ("brfss", "education"): _EDUCATION_SPECIAL_RULE,
+    ("census_income", "education"): _EDUCATION_SPECIAL_RULE,
 }
-
-
-def _render_few_shot_example(story, var_name, levels, answer, extra_rule=None):
-    """One demo Q&A block: same prep_ann_prompt format, completed with the
-    example's known-correct letter."""
-    prompt_text, answer_mapping = prep_ann_prompt(story, var_name, levels, extra_rule=extra_rule)
-    if answer == "NA":
-        letter = string.ascii_uppercase[len(levels)]
-    else:
-        letter = next(l for l, v in answer_mapping.items() if v == answer)
-    return f"{prompt_text}{letter}.\n\n"
 
 
 def prep_ann_prompt(text, var_name, levels, few_shot_examples=None, extra_rule=None):
     """
-    Prepare the prompt for the model.
-    :param prompt: The initial prompt.
-    :param levels: A list of possible answers.
-    :param few_shot_examples: optional entry from
-        py/few_shot_examples.FEW_SHOT_EXAMPLES (with "var_name"/"levels"/
-        "examples" keys) -- rendered as demonstration Q&A blocks prepended
-        before the real query.
-    :param extra_rule: optional extra rule text (e.g. from SPECIAL_RULES),
-        appended after the general ANNOTATION_RULES.
-    :return: The prepared prompt.
-    """
+    Build the single-call structured annotation prompt: the model returns
+    one line of JSON identifying who the story is about, a brief
+    explanation, and the answer letter --
+    {"target_person": ..., "explanation": ..., "answer": "<letter>"}.
 
-    # clean from any appearance of "{" or "}" which may break format
+    The story is placed *last*, after rules/demos/question/answer options/
+    instructions, so that entire preamble is byte-identical across every row
+    for a given (var_name, levels, few_shot_examples, extra_rule) -- i.e.
+    every row of the same (dataset, variable) -- letting vLLM's automatic
+    prefix caching reuse the KV cache for it instead of recomputing the
+    whole prompt on every row (see py/few_shot_helpers.py's module
+    docstring).
+
+    :param few_shot_examples: optional entry from
+        py/few_shot_examples.FEW_SHOT_EXAMPLES ("var_name"/"levels"/
+        "examples" keys) -- rendered as demonstration blocks before the real
+        query, each with a hand-written explanation. Raises ValueError (from
+        py.few_shot_helpers.demo_answer_letter) if an example's answer
+        doesn't match any of `levels` -- callers should dry-run this once
+        per (dataset, variable) and fall back to zero-shot on mismatch.
+    :param extra_rule: optional extra rule text (e.g. from SPECIAL_RULES),
+        appended after ANNOTATION_RULES.
+    :return: (prompt, answer_mapping) -- mapping is letter -> value (None for NA).
+    """
+    # kept from the legacy prompt: harmless now that this is an f-string
+    # rather than str.format(), but no reason for the story to carry braces
     text = re.sub(r"{|}", "", text)
 
     rules = ANNOTATION_RULES
     if extra_rule:
         rules = rules + extra_rule + "\n"
-    rules = rules + "\n"
 
-    prefix = ""
+    answer_key, answer_mapping = prepare_answers(levels)
+
+    demos_section = ""
     if few_shot_examples:
-        prefix = "".join(
-            _render_few_shot_example(
-                ex["story"], few_shot_examples["var_name"], few_shot_examples["levels"], ex["answer"],
-                extra_rule=extra_rule,
-            )
-            for ex in few_shot_examples["examples"].values()
+        demos_section = render_demos_section(
+            few_shot_examples["examples"], var_name, answer_key, answer_mapping
         )
 
-    try:
-        prompt = (
-            "Input: Consider the following text:\n\n"
-            + text
-            + "\n\n"
-            + rules
-            + "Based on the text, determine the person's {}. "
-            + "Begin your answer with the capital letter corresponding to your chosen option below, followed by a period.\n"
-        ).format(var_name)
-    except Exception as e:
-        breakpoint()
-    answers, answer_mapping = prepare_answers(levels)
-    prompt += answers
-    prompt += "\nOutput: "
-    return prefix + prompt, answer_mapping
+    prompt = (
+        f"{rules}\n"
+        f"{demos_section}"
+        f"Question: determine the person's {var_name}.\n\n"
+        f"{answer_key}\n\n"
+        "First identify who the story is about, briefly explain your reasoning, then "
+        "choose the correct option letter. Respond with a single line of JSON in "
+        "exactly this form, no other text:\n"
+        '{"target_person": "<who the story is about>", "explanation": "<brief reasoning>", "answer": "<letter>"}\n\n'
+        f"<story>\n{text}\n</story>"
+    )
+    return prompt, answer_mapping
 
 
-def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_names, var_ord,
-                  engine: str = "transformers", cache_path: str = None,
-                  dataset: str = None, few_shot: bool = False):
+def annotate_data(model, texts_by_attempt, var_dict, var_names, var_ord,
+                  cache_path: str = None, dataset: str = None, few_shot: bool = False):
     """
     Annotate stories against var_dict, retrying with later attempts when an
-    earlier story is missing information.
+    earlier story is missing information. vLLM only -- model must be a
+    vllm.LLM instance.
 
     :param texts_by_attempt: list of K parallel text lists (one list per
         generation attempt, each of length nsamp, row-index-aligned). Attempt
@@ -346,6 +362,8 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
         "n_attempts" column (the 1-indexed attempt at which the row resolved,
         or len(texts_by_attempt) if it never did).
     """
+    from vllm import SamplingParams
+
     n_rounds = len(texts_by_attempt)
     nsamp = len(texts_by_attempt[0])
     var_list = list(var_dict.keys())
@@ -354,111 +372,76 @@ def annotate_data(model, tokenizer, device, texts_by_attempt, var_dict, var_name
     remaining = pd.Index(range(nsamp))
     cache_records = []
 
-    if engine == "vllm":
-        from vllm import SamplingParams
-        vllm_tokenizer = model.get_tokenizer()
-        model_id = model.llm_engine.model_config.model.lower()
-        is_reasoning = "qwen" in model_id or "glm" in model_id
-        template_kwargs = {"enable_thinking": False} if is_reasoning else {}
+    vllm_tokenizer = model.get_tokenizer()
+    model_id = model.llm_engine.model_config.model.lower()
+    is_reasoning = "qwen" in model_id or "glm" in model_id
+    template_kwargs = {"enable_thinking": False} if is_reasoning else {}
 
-        for attempt, texts in enumerate(texts_by_attempt, start=1):
-            if len(remaining) == 0:
-                break
-            print(f"    Annotating attempt {attempt}/{n_rounds} ({len(remaining)} rows)")
+    for attempt, texts in enumerate(texts_by_attempt, start=1):
+        if len(remaining) == 0:
+            break
+        print(f"    Annotating attempt {attempt}/{n_rounds} ({len(remaining)} rows)")
 
-            for var, levels in tqdm(var_dict.items(), desc=f"Annotating (attempt {attempt})"):
+        for var, levels in tqdm(var_dict.items(), desc=f"Annotating (attempt {attempt})"):
 
-                var_name = var_names.get(var, var)
-                fs_examples = FEW_SHOT_EXAMPLES.get((dataset, var)) if few_shot else None
-                extra_rule = SPECIAL_RULES.get((dataset, var))
-                _, answer_mapping = prepare_answers(levels)
-                letters = list(answer_mapping.keys())
-                letter_ids = [vllm_tokenizer.encode(l, add_special_tokens=False)[0] for l in letters]
-                id_to_letter = {tid: l for tid, l in zip(letter_ids, letters)}
+            var_name = var_names.get(var, var)
+            extra_rule = SPECIAL_RULES.get((dataset, var))
+            _, answer_mapping = prepare_answers(levels)
 
-                sub_texts = [texts[pos] for pos in remaining]
-                ann_prompts = [prep_ann_prompt(text, var_name, levels, fs_examples, extra_rule)[0] for text in sub_texts]
-                chat_ann_prompts = [
-                    vllm_tokenizer.apply_chat_template(
-                        [{"role": "user", "content": p}],
-                        tokenize=True,
-                        return_dict=False,  # add
-                        add_generation_prompt=True,
-                        **template_kwargs,
-                    )
-                    for p in ann_prompts
-                ]
-                sp = SamplingParams(max_tokens=1, temperature=0, allowed_token_ids=letter_ids)
-                vllm_inputs = [{"prompt_token_ids": p} for p in chat_ann_prompts]
-                outputs = model.generate(vllm_inputs, sp)
+            sub_texts = [texts[pos] for pos in remaining]
 
-                for pos, output, prompt in zip(remaining, outputs, ann_prompts):
-                    tid = output.outputs[0].token_ids[0]
-                    letter = id_to_letter.get(tid, "")
-                    pred_answer = answer_mapping.get(letter, None)
-                    df.loc[pos, var] = pred_answer
+            fs_examples = FEW_SHOT_EXAMPLES.get((dataset, var)) if few_shot else None
+            if fs_examples is not None:
+                # dry-run once against the live levels so a stale demo
+                # answer (few_shot_examples.py drifted from the live
+                # var_dict) fails safe here, not mid-batch
+                try:
+                    prep_ann_prompt(sub_texts[0], var_name, levels, fs_examples, extra_rule)
+                except ValueError as e:
+                    print(f"    [few_shot] demos for ({dataset}, {var}) don't match live levels ({e}) -- falling back to zero-shot")
+                    fs_examples = None
 
-                    if cache_path is not None:
-                        cache_records.append({
-                            "row": pos,
-                            "variable": var,
-                            "attempt": attempt,
-                            "prompt": prompt,
-                            "response": letter,
-                        })
+            # story placed last in the prompt (see prep_ann_prompt) so this
+            # whole batch shares one cacheable prefix -- rules/demos/
+            # question/answer options/instructions are identical for every
+            # row here, only the trailing <story> differs
+            ann_prompts = [prep_ann_prompt(text, var_name, levels, fs_examples, extra_rule)[0] for text in sub_texts]
+            chat_ann_prompts = [
+                vllm_tokenizer.apply_chat_template(
+                    [{"role": "user", "content": p}],
+                    tokenize=True,
+                    return_dict=False,  # add
+                    add_generation_prompt=True,
+                    **template_kwargs,
+                )
+                for p in ann_prompts
+            ]
+            max_tokens = 300 if fs_examples is not None else 150
+            sp = SamplingParams(max_tokens=max_tokens, temperature=0)
+            vllm_inputs = [{"prompt_token_ids": p} for p in chat_ann_prompts]
+            outputs = model.generate(vllm_inputs, sp)
 
-            n_attempts.loc[remaining] = attempt
-            still_invalid = df.loc[remaining, var_list].isna().any(axis=1)
-            remaining = still_invalid[still_invalid].index
+            for pos, output, prompt in zip(remaining, outputs, ann_prompts):
+                raw = output.outputs[0].text.strip()
+                letter, target_person, explanation = parse_json_answer(raw)
+                pred_answer = answer_mapping.get(letter) if letter else None
+                df.loc[pos, var] = pred_answer
 
-    else:  # transformers
-        for attempt, texts in enumerate(texts_by_attempt, start=1):
-            if len(remaining) == 0:
-                break
-            print(f"    Annotating attempt {attempt}/{n_rounds} ({len(remaining)} rows)")
+                if cache_path is not None:
+                    cache_records.append({
+                        "row": pos,
+                        "variable": var,
+                        "attempt": attempt,
+                        "prompt": prompt,
+                        "response": raw,
+                        "target_person": target_person,
+                        "explanation": explanation,
+                        "predicted": pred_answer,
+                    })
 
-            for var, levels in tqdm(var_dict.items(), desc=f"Annotating (attempt {attempt})"):
-
-                _, answer_mapping = prepare_answers(levels)
-                var_name = var_names.get(var, var)
-                fs_examples = FEW_SHOT_EXAMPLES.get((dataset, var)) if few_shot else None
-                extra_rule = SPECIAL_RULES.get((dataset, var))
-
-                for pos in remaining:
-                    text = texts[pos]
-                    ann_prompt, _ = prep_ann_prompt(text, var_name, levels, fs_examples, extra_rule)
-                    inputs = tokenizer(ann_prompt, return_tensors="pt").to(device)
-                    level_ids = [
-                        [tokenizer.convert_tokens_to_ids(tok) for tok in ans]
-                        for ans in answer_mapping.keys()
-                    ]
-
-                    with torch.no_grad():
-                        outputs = model(**inputs).logits
-                        next_token_logits = outputs[:, -1, :]
-                        probs = torch.softmax(next_token_logits, dim=-1)
-
-                    level_probs = [
-                        sum(probs[0, tid].item() for tid in ids) for ids in level_ids
-                    ]
-
-                    pred_idx = max(range(len(level_probs)), key=level_probs.__getitem__)
-                    pred_letter = list(answer_mapping.keys())[pred_idx]
-                    pred_answer = answer_mapping[pred_letter]
-                    df.loc[pos, var] = pred_answer
-
-                    if cache_path is not None:
-                        cache_records.append({
-                            "row": pos,
-                            "variable": var,
-                            "attempt": attempt,
-                            "prompt": ann_prompt,
-                            "response": pred_letter,
-                        })
-
-            n_attempts.loc[remaining] = attempt
-            still_invalid = df.loc[remaining, var_list].isna().any(axis=1)
-            remaining = still_invalid[still_invalid].index
+        n_attempts.loc[remaining] = attempt
+        still_invalid = df.loc[remaining, var_list].isna().any(axis=1)
+        remaining = still_invalid[still_invalid].index
 
     for var, levels in var_dict.items():
         df[var] = pd.Categorical(df[var], categories=levels, ordered=var_ord[var])

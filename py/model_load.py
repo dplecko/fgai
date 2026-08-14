@@ -72,6 +72,11 @@ def get_vllm_model(model_path, dtype="bfloat16", tensor_parallel_size=None):
         trust_remote_code=True,
         tensor_parallel_size=tensor_parallel_size,
         max_logprobs=26,
+        # explicit, not relying on the version default: prep_ann_prompt puts
+        # the story last specifically so this shared (rules/demos/question/
+        # answer options/instructions) prefix is reused across every row of
+        # a (dataset, variable) group instead of recomputed each time.
+        enable_prefix_caching=True,
     )
     name = _PATH_TO_NAME.get(model_path)
     if name:

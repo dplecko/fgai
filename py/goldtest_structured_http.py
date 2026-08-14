@@ -12,16 +12,16 @@
 #       --ann_model llama3_405b --served_model_name llama3_405b
 import argparse
 import concurrent.futures
-import json
 import os
 
 import pandas as pd
 from openai import OpenAI
 
 from py.few_shot_examples import FEW_SHOT_EXAMPLES
+from py.few_shot_helpers import parse_json_answer
 from py.goldtest_structured import (
-    OUT_DIR, JSON_RE, SPECIAL_RULES,
-    build_prompt, parse_letter, dataset_info, load_gold,
+    OUT_DIR, SPECIAL_RULES,
+    build_prompt, dataset_info, load_gold,
 )
 
 
@@ -120,15 +120,9 @@ def main():
 
     for i in range(len(gold)):
         text = (texts[i] or "").strip()
-        m = JSON_RE.search(text)
-        if m:
-            try:
-                parsed = json.loads(m.group(0))
-                target_persons[i] = parsed.get("target_person")
-                explanations[i] = parsed.get("explanation")
-            except (json.JSONDecodeError, AttributeError):
-                pass
-        letter = parse_letter(text)
+        letter, target_person, explanation = parse_json_answer(text)
+        target_persons[i] = target_person
+        explanations[i] = explanation
         if letter is None:
             parse_failed[i] = True
             predictions[i] = None
