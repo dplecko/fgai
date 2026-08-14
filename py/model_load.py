@@ -20,7 +20,12 @@ MODEL_PATHS = {
     "glm45_air": "zai-org/GLM-4.5-Air",
     "commandrp_104b": "CohereLabs/c4ai-command-r-plus-08-2024",
     "qwen25_72b": "Qwen/Qwen2.5-72B-Instruct",
-    "mistral35_128b": "mistralai/Mistral-Medium-3.5-128B"
+    "mistral35_128b": "mistralai/Mistral-Medium-3.5-128B",
+    "llama4_scout": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+    "commanda_111b": "CohereLabs/c4ai-command-a-03-2025",
+    "nemotron15_49b": "nvidia/Llama-3_3-Nemotron-Super-49B-v1_5",
+    "llama3_405b": "meta-llama/Llama-3.1-405B-Instruct",
+     
 }
 
 VLLM_OVERRIDES = {
@@ -43,6 +48,15 @@ VLLM_OVERRIDES = {
     # Qwen3.5 is a hybrid VL model; its LM has tokens the VL tokenizer/vocab
     # doesn't, which trips vLLM's max_token_id check unless multimodal is disabled.
     "qwen35_122b_a10b": {"language_model_only": True},
+    # 405B doesn't fit on one node (~810GB bf16 weights vs 4x96GB=384GB/node) --
+    # needs a multi-node Ray cluster (see goldtest_405b.sh) spanning 4 nodes x 4
+    # GPUs = 16, which evenly divides its 128 attention heads. tensor_parallel_size
+    # here overrides get_vllm_model's local torch.cuda.device_count() default, which
+    # would otherwise only see this node's 4 GPUs.
+    "llama3_405b": {
+        "tensor_parallel_size": 16,
+        "distributed_executor_backend": "ray",
+    },
 }
 _PATH_TO_NAME = {v: k for k, v in MODEL_PATHS.items()}
 
