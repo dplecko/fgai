@@ -6,8 +6,17 @@
 # Usage (inside the fgai container):
 #   python3 -m py.inspect_prompt --dataset census_income --var education --few_shot
 #   python3 -m py.inspect_prompt --dataset nsduh --var race
+# Or interactively (e.g. Positron/IPython console, where sys.argv is the
+# kernel's own args, not yours):
+#   from py.inspect_prompt import main
+#   main(["--dataset", "census_income", "--var", "education", "--few_shot"])
 import argparse
 import glob
+import sys
+from pathlib import Path
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
@@ -16,13 +25,13 @@ from py.few_shot_examples import FEW_SHOT_EXAMPLES
 from py.data_helpers import load_data
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--var", type=str, required=True)
     parser.add_argument("--few_shot", action="store_true")
     parser.add_argument("--row", type=int, default=0, help="row index within the first matching gen file")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     matches = sorted(glob.glob(f"data/cache/{args.dataset}_*_gen.parquet"))
     matches = [m for m in matches if "_attempt" not in m]
