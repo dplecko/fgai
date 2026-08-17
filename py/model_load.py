@@ -6,7 +6,10 @@ MODEL_PATHS = {
     # smaller models
     "llama3_8b": "meta-llama/Llama-3.1-8B-Instruct",
     "ministral3_8b": "mistralai/Ministral-3-8B-Instruct-2512",
+    "ministral3_14b": "mistralai/Ministral-3-14B-Instruct-2512",
+    "mistral_24b": "mistralai/Mistral-Small-24B-Instruct-2501",
     "gemma3_4b": "google/gemma-3-4b-it",
+    "gemma3_12b": "google/gemma-3-12b-it",
     "qwen35_9b": "Qwen/Qwen3.5-9B",
     "deepseek_7b": "deepseek-ai/deepseek-llm-7b-chat",
     "phi4": "microsoft/phi-4",
@@ -14,6 +17,7 @@ MODEL_PATHS = {
     "qwen35_27b": "Qwen/Qwen3.5-27B",
     "gemma3_27b": "google/gemma-3-27b-it",
     "deepseek_r1": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+    "deepseek_r1_14b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
     "llama3_70b": "meta-llama/Llama-3.3-70B-Instruct",
     # annotator-only models (annotator-robustness sensitivity analysis)
     "qwen35_122b_a10b": "Qwen/Qwen3.5-122B-A10B",
@@ -41,13 +45,35 @@ VLLM_OVERRIDES = {
         # budget entirely as a workaround.
         "limit_mm_per_prompt": {"image": 0},
     },
+    "ministral3_14b": {
+        "tokenizer_mode": "mistral",
+        "config_format": "mistral",
+        "load_format": "mistral",
+        "limit_mm_per_prompt": {"image": 0},
+    },
     "mistral35_128b": {
         "max_model_len": 8192,
         "language_model_only": True,
     },
+    "mistral_24b": {
+        "tokenizer_mode": "mistral",
+        "config_format": "mistral",
+        "load_format": "mistral",
+        "max_model_len": 8192,
+    },
     # Qwen3.5 is a hybrid VL model; its LM has tokens the VL tokenizer/vocab
     # doesn't, which trips vLLM's max_token_id check unless multimodal is disabled.
-    "qwen35_122b_a10b": {"language_model_only": True},
+    # It's also a hybrid Mamba/attention architecture -- vLLM's own log flags
+    # "Prefix caching in Mamba cache 'align' mode ... is experimental", and in
+    # practice (2026-08-14 ann_only.sh sweep, qwen35_27b as annotator) it
+    # deadlocks in the EngineCore<->Worker shared-memory broadcast under TP=4,
+    # hanging until SLURM's time limit kills the job (~240 GPU-hours wasted
+    # across 5 jobs that each hung for the full 12h). Disabled here for the
+    # whole qwen35 family; every other model keeps prefix caching on (see
+    # get_vllm_model's default) since it's proven to work fine elsewhere.
+    "qwen35_9b": {"enable_prefix_caching": False},
+    "qwen35_27b": {"enable_prefix_caching": False},
+    "qwen35_122b_a10b": {"language_model_only": True, "enable_prefix_caching": False},
     # 405B doesn't fit on one node (~810GB bf16 weights vs 4x96GB=384GB/node) --
     # needs a multi-node Ray cluster (see goldtest_405b.sh) spanning 4 nodes x 4
     # GPUs = 16, which evenly divides its 128 attention heads. tensor_parallel_size
