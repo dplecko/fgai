@@ -106,6 +106,14 @@ load_model_data <- function(dataset, model, ann_model = "llama3_70b", minority =
 prepare_for_osd <- function(data, sfm) {
   
   X <- sfm$X
+
+  # check if any NAs prevail (after 4 attempts)
+  cmpc <- complete.cases(data)
+  if (!all(cmpc)) {
+    perc_rm <- round(100 * sum(!cmpc) / nrow(data), 2)
+    message("- removing ", perc_rm, "% in preparation for OSD")
+    data <- data[cmpc, ]
+  }
   
   for (col in names(data)) {
     
@@ -175,7 +183,7 @@ estimate_within <- function(df_lst, X, Z, W, Y,
     suffix <- gen_suffix(style, temperature, top_p)
     cache_file <- file.path(cache_dir, f("{dataset}_{model}_{ann_model}{suffix}.rds"))
     if (file.exists(cache_file)) {
-      message("Loading cached: ", model)
+      message("- loading cached")
       return(readRDS(cache_file))
     }
   }

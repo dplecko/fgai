@@ -34,6 +34,18 @@ for (idx in which(!sim_mat[, 6])) {
 
 
 
-# read_parquet("data/cache/census_income_llama3_8b_llama3_70b__ann.parquet")
+ann <- as.data.table(read_parquet("data/cache/nsduh_llama3_8b_llama3_70b__ann.parquet"))
 
+samp <- function() {
+  
+  idx <- sample.int(nrow(ann), 1)
+  
+  cat("Variable:", ann[idx]$variable, "\n")
+  cat(sub("(?s)^.*<story>", "", ann[idx]$prompt, perl = TRUE), "\n\n")
+  cat(ann[idx]$response, "\n\n")
+  cat("Predicted:", ann[idx]$predicted, "\n")
+}
 
+samp()
+
+head(ann)
