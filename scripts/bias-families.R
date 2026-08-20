@@ -11,9 +11,7 @@ N_PERM   <- 5000
 FAMILIES <- list(
   llama    = c("llama3_8b", "llama3_70b"),
   qwen     = c("qwen35_9b", "qwen35_27b"),
-  deepseek = c("deepseek_7b", "deepseek_r1"),
-  gemma    = c("gemma3_4b", "gemma3_27b")
-  # singletons: ministral3_8b, phi4 — not in any family
+  mistral = c("ministral3_8b", "ministral3_14b", "mistral_24b")
 )
 
 # build family label vector aligned with `models`

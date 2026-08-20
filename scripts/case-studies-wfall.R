@@ -2,8 +2,8 @@
 root <- rprojroot::find_root(rprojroot::has_file(".gitignore"))
 invisible(lapply(list.files(file.path(root, "r"), full.names = TRUE), source))
 
-datasets <- c("nsduh", "nsduh", "brfss")
-models   <- c("gemma3_27b", "llama3_70b", "qwen35_27b")
+datasets <- c("nsduh", "brfss")
+models   <- c("llama3_8b", "qwen35_27b")
 
 for (i in seq_along(datasets)) {
   
@@ -31,7 +31,7 @@ for (i in seq_along(datasets)) {
   for (grp in c("DE", "IE", "SE")) {
     
     plot <- wfalls[[grp]]
-    if ((grp == "DE" & dataset == "nsduh") || grp == "IE" & dataset == "brfss") {
+    if ((grp == "SE" & dataset == "nsduh") || grp == "DE" & dataset == "brfss") {
       plot <- plot + theme(
         legend.position = "inside",
         legend.position.inside = c(0.5, 0.06),

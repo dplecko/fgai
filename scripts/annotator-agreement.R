@@ -79,80 +79,80 @@ p
 
 ggsave("results/annotator-agreement.png", p, width = 12, height = 7)
 
-# --- inspect qwen vs. command r+ disagreements for one (dataset, variable, ---
+# --- inspect llama vs. command A disagreements for one (dataset, variable, ---
 # --- generative model), printing both annotators' prompts side by side -----
-inspect_disagreements <- function(dataset, var, model, n = 10, seed = 1) {
-  read_one <- function(ann_model) {
-    fl <- f("data/cache/{dataset}_{model}_{ann_model}__ann.parquet")
-    log <- as.data.table(read_parquet(fl))
-    if (!("row" %in% names(log))) {
-      log[, row := seq_len(.N) - 1L, by = variable]
-    }
-    if (!("attempt" %in% names(log))) {
-      log[, attempt := 1L]
-    }
-    unique(
-      log[
-        attempt == 1 & variable == var,
-        .(row, predicted = as.character(predicted), response, prompt)
-      ],
-      by = "row"
-    )
-  }
+# inspect_disagreements <- function(dataset, var, model, n = 10, seed = 1) {
+#   read_one <- function(ann_model) {
+#     fl <- f("data/cache/{dataset}_{model}_{ann_model}__ann.parquet")
+#     log <- as.data.table(read_parquet(fl))
+#     if (!("row" %in% names(log))) {
+#       log[, row := seq_len(.N) - 1L, by = variable]
+#     }
+#     if (!("attempt" %in% names(log))) {
+#       log[, attempt := 1L]
+#     }
+#     unique(
+#       log[
+#         attempt == 1 & variable == var,
+#         .(row, predicted = as.character(predicted), response, prompt)
+#       ],
+#       by = "row"
+#     )
+#   }
 
-  cmp <- merge(
-    read_one(ann_a),
-    read_one(ann_b),
-    by = "row",
-    suffixes = c("_a", "_b")
-  )
-  agree <- fcoalesce(
-    cmp$predicted_a == cmp$predicted_b,
-    is.na(cmp$predicted_a) & is.na(cmp$predicted_b)
-  )
-  disagree <- cmp[!agree]
+#   cmp <- merge(
+#     read_one(ann_a),
+#     read_one(ann_b),
+#     by = "row",
+#     suffixes = c("_a", "_b")
+#   )
+#   agree <- fcoalesce(
+#     cmp$predicted_a == cmp$predicted_b,
+#     is.na(cmp$predicted_a) & is.na(cmp$predicted_b)
+#   )
+#   disagree <- cmp[!agree]
 
-  if (!nrow(disagree)) {
-    message("No disagreements for ", dataset, " / ", var, " / ", model)
-    return(invisible(NULL))
-  }
+#   if (!nrow(disagree)) {
+#     message("No disagreements for ", dataset, " / ", var, " / ", model)
+#     return(invisible(NULL))
+#   }
 
-  set.seed(seed)
-  sampled <- disagree[sample(.N, min(n, .N))]
+#   set.seed(seed)
+#   sampled <- disagree[sample(.N, min(n, .N))]
 
-  for (i in seq_len(nrow(sampled))) {
-    r <- sampled[i]
-    cat("\n", strrep("=", 70), "\n", sep = "")
-    cat(
-      "row:",
-      r$row,
-      "| dataset:",
-      dataset,
-      "| variable:",
-      var,
-      "| model:",
-      model,
-      "\n"
-    )
-    cat(strrep("-", 70), "\n[", ann_a, "]\n", r$prompt_a, "\n", sep = "")
-    cat(strrep("-", 70), "\n[", ann_b, "]\n", r$prompt_b, "\n", sep = "")
-    cat(
-      strrep("-", 70),
-      "\n",
-      ann_a,
-      ":",
-      r$response_a,
-      " | ",
-      ann_b,
-      ":",
-      r$response_b,
-      "\n",
-      sep = ""
-    )
-    browser()
-  }
+#   for (i in seq_len(nrow(sampled))) {
+#     r <- sampled[i]
+#     cat("\n", strrep("=", 70), "\n", sep = "")
+#     cat(
+#       "row:",
+#       r$row,
+#       "| dataset:",
+#       dataset,
+#       "| variable:",
+#       var,
+#       "| model:",
+#       model,
+#       "\n"
+#     )
+#     cat(strrep("-", 70), "\n[", ann_a, "]\n", r$prompt_a, "\n", sep = "")
+#     cat(strrep("-", 70), "\n[", ann_b, "]\n", r$prompt_b, "\n", sep = "")
+#     cat(
+#       strrep("-", 70),
+#       "\n",
+#       ann_a,
+#       ":",
+#       r$response_a,
+#       " | ",
+#       ann_b,
+#       ":",
+#       r$response_b,
+#       "\n",
+#       sep = ""
+#     )
+#     browser()
+#   }
 
-  invisible(sampled)
-}
+#   invisible(sampled)
+# }
 
-inspect_disagreements("census_income", "salary_group", "ministral3_8b", n = 10)
+# inspect_disagreements("census_income", "salary_group", "ministral3_8b", n = 10)
