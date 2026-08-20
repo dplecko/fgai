@@ -68,7 +68,8 @@ srun --environment=fgai --nodes=1 --ntasks=1 -w "$head_node" \
         --tensor-parallel-size 4 --pipeline-parallel-size 4 \
         --distributed-executor-backend mp \
         --nnodes 4 --node-rank 0 --master-addr '$head_node_ip' \
-        --port $PORT --trust-remote-code --dtype bfloat16 --max-logprobs 26 --enforce-eager" \
+        --port $PORT --trust-remote-code --dtype bfloat16 --max-logprobs 26 --enforce-eager \
+        --enable-prefix-caching" \
     > logs/vllm_serve_head.log 2>&1 &
 
 rank=1
@@ -79,7 +80,8 @@ for worker in "${nodes[@]:1}"; do
             --tensor-parallel-size 4 --pipeline-parallel-size 4 \
             --distributed-executor-backend mp \
             --nnodes 4 --node-rank $rank --master-addr '$head_node_ip' \
-            --port $PORT --trust-remote-code --dtype bfloat16 --max-logprobs 26 --enforce-eager --headless" \
+            --port $PORT --trust-remote-code --dtype bfloat16 --max-logprobs 26 --enforce-eager \
+            --enable-prefix-caching --headless" \
         > "logs/vllm_serve_worker${rank}.log" 2>&1 &
     rank=$((rank + 1))
 done
