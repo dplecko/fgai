@@ -138,14 +138,14 @@ plot_annotator_heatmap <- function(metric = c("absolute", "sd_normalized")) {
 }
 
 plots <- setNames(lapply(HEATMAP_METRICS, plot_annotator_heatmap), HEATMAP_METRICS)
-cowplot::plot_grid(plotlist = plots)
+# cowplot::plot_grid(plotlist = plots)
 
 dir.create("results", showWarnings = FALSE, recursive = TRUE)
 for (metric in names(plots)) {
   ggsave(
     f("results/annotator-sensitivity-{metric}.png"),
-    plots[[metric]], width = 18, height = 7
+    plots[[metric]], width = 12, height = 4.66
   )
 }
 
-print(plots[[HEATMAP_METRICS[1]]])
+table(cut(wide$sd_normalized, c(0, 1, 2, Inf))) / nrow(wide) * 100

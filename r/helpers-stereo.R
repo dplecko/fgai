@@ -72,7 +72,16 @@ write_stereotype_latex <- function(scores_dt, file,
   summary[is.na(count), count := 0]
   summary[, total := sum(count), by = .(model, direction)]
   summary[total == 0, total := 1]
-  summary[, proportion := count / total]
+  summary[, proportion := {
+    raw_pct <- 100 * count / total
+    pct <- floor(raw_pct)
+    remainder <- if (sum(count) > 0) 100 - sum(pct) else 0
+    if (remainder > 0) {
+      add_to <- order(raw_pct - pct, decreasing = TRUE)[seq_len(remainder)]
+      pct[add_to] <- pct[add_to] + 1
+    }
+    pct / 100
+  }, by = .(model, direction)]
   
   wide <- dcast(summary, model ~ direction + classification,
                 value.var = "proportion")

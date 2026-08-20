@@ -21,14 +21,15 @@ scores_all <- score_eff(eff_all)
 
 # --- per-dataset tables (appendix) ------------------------------------------
 
-# for (ds in datasets) {
-#   write_stereotype_latex(
-#     scores_all[dataset == ds],
-#     f("results/stereotype-table-{ds}.tex"),
-#     caption = f("Stereotype analysis: {ds}."),
-#     label = f("tab:stereotype-{ds}")
-#   )
-# }
+for (ds in datasets) {
+  write_stereotype_latex(
+    scores_all[dataset == ds],
+    f("results/stereotype-table-{ds}.tex"),
+    caption = f("Stereotype analysis: {ds}."),
+    label = f("tab:stereotype-{ds}"),
+    include_advantage = TRUE
+  )
+}
 
 # --- aggregate table (main text) --------------------------------------------
 

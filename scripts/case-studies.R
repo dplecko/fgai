@@ -63,24 +63,6 @@ scores_dt <- score_eff(eff_all)
 surprises <- find_surprises(scores_dt, eff_all)
 print(surprises)
 
-# Class 1
-print(surprises[class == "reversal" & direction == "advantage"], topn = 161)
-
-# solid pick
-scores_dt[model == "gemma3_27b" & dataset == "nsduh" & stage == "fw"]
-
-# Class 2
-print(surprises[class == "amplification" & significant == 1], topn = 161)
-
-# not a bad pick!
-scores_dt[model == "llama3_70b" & dataset == "brfss" & stage == "fy"]
-
-
-scores_dt[model == "llama3_8b" & dataset == "brfss" & stage == "fy"]
-
-# wholesale inversion; classic
+# best picks
+scores_dt[model == "llama3_8b" & dataset == "nsduh" & stage == "fw"]
 scores_dt[model == "qwen35_27b" & dataset == "brfss" & stage == "model"]
-
-# Class 3
-print(surprises[class == "tv_hides_bias"], topn = 161)
-scores_dt[model == "gemma3_27b" & dataset == "census_income" & stage == "model"]
