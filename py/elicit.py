@@ -1,7 +1,8 @@
 # nohup python workspace/elicit.py --model llama3_8b --batch 1 > logs/elicit_llama3_8b.log 2>&1 &
 import argparse
-import torch
-from py.common import *
+import torch, re
+import pandas as pd
+from tqdm import tqdm
 from py.model_load import MODEL_PATHS, get_model, get_vllm_model, model_batchsize
 from py.generation import *
 from py.data_helpers import load_data

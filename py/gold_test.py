@@ -13,7 +13,6 @@
 import argparse
 import json
 import os
-os.environ["ANTHROPIC_API_KEY"] = "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"
 import re
 import string
 import time

@@ -29,7 +29,6 @@ MODEL_PATHS = {
     "commanda_111b": "CohereLabs/c4ai-command-a-03-2025",
     "nemotron15_49b": "nvidia/Llama-3_3-Nemotron-Super-49B-v1_5",
     "llama3_405b": "meta-llama/Llama-3.1-405B-Instruct",
-     
 }
 
 VLLM_OVERRIDES = {
