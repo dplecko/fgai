@@ -109,7 +109,7 @@ pso_diff <- function(cfit, data, X, Z, W, Y, ...) {
       
       if (xz == xw & xz == xy) next
       pso[[xz+1]][[xw+1]][[xy+1]] <-
-        (x == xy) / mean(x == xw) * px_zw[[xw+1]] / px_zw[[xw+1]] *
+        (x == xy) / mean(x == xw) * px_zw[[xw+1]] / px_zw[[xy+1]] *
         (y - y_xzw[[xy+1]]) +
         (x == xw) / mean(x == xw) * y_xzw[[xy+1]]
     }
@@ -119,7 +119,7 @@ pso_diff <- function(cfit, data, X, Z, W, Y, ...) {
       
       if (xz == xw & xz == xy) next
       pso[[xz+1]][[xw+1]][[xy+1]] <-
-        (x == xy) / mean(x == xz) * px_zw[[xz+1]] / px_zw[[xz+1]] *
+        (x == xy) / mean(x == xz) * px_z[[xz+1]] / px_z[[xy+1]] *
         (y - y_xzw[[xy+1]]) +
         (x == xz) / mean(x == xz) * y_xzw[[xy+1]]
     }
